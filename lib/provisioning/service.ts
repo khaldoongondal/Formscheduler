@@ -1,4 +1,4 @@
-import { PLANS, type PlanId } from "@/lib/billing/plans";
+import { PLANS, type PlanState } from "@/lib/billing/plans";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Tenant } from "@/lib/types/database";
 
@@ -9,7 +9,7 @@ export type ProvisionResult = {
   user_id: string;
   user_created: boolean;
   tenant_created: boolean;
-  plan: PlanId;
+  plan: PlanState;
 };
 
 function slugify(value: string) {
@@ -57,7 +57,7 @@ async function findUserIdByEmail(email: string) {
 export async function provisionTenant(input: {
   email: string;
   tenant_name?: string;
-  plan?: PlanId;
+  plan?: PlanState;
 }): Promise<ProvisionResult> {
   const supabase = createServiceClient();
   const email = input.email.trim().toLowerCase();

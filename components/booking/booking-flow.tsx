@@ -1215,11 +1215,21 @@ function TermsNote({ className = "" }: { className?: string }) {
   return (
     <p className={`${className} text-xs leading-5 text-slate-500 sm:text-sm sm:leading-6`}>
       By continuing, I agree to{" "}
-      <a className="font-semibold text-slate-700 underline underline-offset-2" href="#">
+      <a
+        className="font-semibold text-slate-700 underline underline-offset-2"
+        href="/terms"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         terms
       </a>{" "}
       &{" "}
-      <a className="font-semibold text-slate-700 underline underline-offset-2" href="#">
+      <a
+        className="font-semibold text-slate-700 underline underline-offset-2"
+        href="/privacy"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         privacy policy
       </a>
       .

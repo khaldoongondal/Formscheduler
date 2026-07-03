@@ -36,11 +36,13 @@ export const PLANS: Record<PlanId, PlanLimits> = {
   }
 };
 
+export type PlanState = PlanId | "suspended";
+
 export function isPlanId(value: unknown): value is PlanId {
   return value === "tier1" || value === "tier2" || value === "tier3";
 }
 
-export async function getTenantPlan(tenantId: string): Promise<PlanLimits> {
+export async function getTenantPlanState(tenantId: string): Promise<PlanState> {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("tenants")
@@ -49,7 +51,23 @@ export async function getTenantPlan(tenantId: string): Promise<PlanLimits> {
     .single();
 
   if (error) throw new Error(error.message);
-  return isPlanId(data.plan) ? PLANS[data.plan] : PLANS.tier1;
+  if (data.plan === "suspended") return "suspended";
+  return isPlanId(data.plan) ? data.plan : "tier1";
+}
+
+const SUSPENDED_MESSAGE =
+  "This account is suspended. Renew your subscription to keep using Leadder Scheduler.";
+
+export async function getTenantPlan(tenantId: string): Promise<PlanLimits> {
+  const state = await getTenantPlanState(tenantId);
+  if (state === "suspended") {
+    throw new Error(SUSPENDED_MESSAGE);
+  }
+  return PLANS[state];
+}
+
+export async function isTenantSuspended(tenantId: string) {
+  return (await getTenantPlanState(tenantId)) === "suspended";
 }
 
 export async function assertCanCreateFunnel(tenantId: string) {

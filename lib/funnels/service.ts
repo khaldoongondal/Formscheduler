@@ -1,6 +1,6 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
-import { assertCanCreateFunnel, assertCanUseCalendar } from "@/lib/billing/plans";
+import { assertCanCreateFunnel, assertCanUseCalendar, isTenantSuspended } from "@/lib/billing/plans";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel, Question, QuestionOption } from "@/lib/types/database";
 import { mergeContactFieldSettings, resolveContactFieldConfig } from "@/lib/funnels/contact-fields";
@@ -169,6 +169,9 @@ export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | nul
   }
 
   if (!funnelBase) return null;
+
+  // Suspended tenants (lapsed subscriptions) stop serving public booking pages.
+  if (await isTenantSuspended(funnelBase.tenant_id)) return null;
 
   const { data: questions, error: questionsError } = await supabase
     .from("questions")

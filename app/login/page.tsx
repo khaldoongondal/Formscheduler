@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Lock } from "lucide-react";
 import { signIn } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,15 @@ export default async function LoginPage({
               <Input id="email" name="email" type="email" required autoComplete="email" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
+                  href="/auth/reset-password"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input id="password" name="password" type="password" required autoComplete="current-password" />
             </div>
             {params.error ? <p className="text-sm text-red-600">{params.error}</p> : null}
