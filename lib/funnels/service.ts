@@ -1,5 +1,6 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
+import { assertCanCreateFunnel, assertCanUseCalendar } from "@/lib/billing/plans";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel, Question, QuestionOption } from "@/lib/types/database";
 import { mergeContactFieldSettings, resolveContactFieldConfig } from "@/lib/funnels/contact-fields";
@@ -270,6 +271,8 @@ function getMissingInsertColumn(message: string, payload: Record<string, unknown
 
 export async function createFunnel(input: unknown) {
   const parsed = createFunnelSchema.parse(input);
+  await assertCanCreateFunnel(parsed.tenant_id);
+  await assertCanUseCalendar(parsed.tenant_id, parsed.calendar_id);
   const supabase = createServiceClient();
   const {
     contact_field_order: contactFieldOrder,
@@ -338,6 +341,16 @@ export async function updateFunnel(input: unknown) {
     theme,
     ...funnel
   } = parsed;
+  if (Object.prototype.hasOwnProperty.call(funnel, "calendar_id") && funnel.calendar_id) {
+    const { data: existing, error: existingError } = await supabase
+      .from("funnels")
+      .select("tenant_id")
+      .eq("id", id)
+      .single();
+    if (existingError) throw new Error(existingError.message);
+    await assertCanUseCalendar(existing.tenant_id, funnel.calendar_id, id);
+  }
+
   const hasQualificationRuleUpdates =
     contactFields ||
     contactFieldOrder ||
@@ -434,6 +447,8 @@ export async function updateFunnel(input: unknown) {
 export async function duplicateFunnel(id: string) {
   const source = await getFunnelById(id);
   if (!source) throw new Error("Funnel not found.");
+
+  await assertCanCreateFunnel(source.tenant_id);
 
   const supabase = createServiceClient();
   const duplicatedSlug = `${source.slug}-copy-${Date.now().toString(36)}`;

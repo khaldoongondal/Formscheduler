@@ -35,6 +35,7 @@ export interface Tenant {
   id: string;
   name: string;
   slug: string;
+  plan: "tier1" | "tier2" | "tier3";
   created_at: string;
   updated_at: string;
 }

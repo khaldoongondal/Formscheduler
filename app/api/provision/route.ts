@@ -7,7 +7,8 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 const provisionSchema = z.object({
   email: z.string().email(),
-  tenant_name: z.string().min(1).max(120).optional()
+  tenant_name: z.string().min(1).max(120).optional(),
+  plan: z.enum(["tier1", "tier2", "tier3"]).optional()
 });
 
 function isAuthorized(request: NextRequest) {

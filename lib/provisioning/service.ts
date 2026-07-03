@@ -1,3 +1,4 @@
+import { PLANS, type PlanId } from "@/lib/billing/plans";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Tenant } from "@/lib/types/database";
 
@@ -8,6 +9,7 @@ export type ProvisionResult = {
   user_id: string;
   user_created: boolean;
   tenant_created: boolean;
+  plan: PlanId;
 };
 
 function slugify(value: string) {
@@ -55,10 +57,12 @@ async function findUserIdByEmail(email: string) {
 export async function provisionTenant(input: {
   email: string;
   tenant_name?: string;
+  plan?: PlanId;
 }): Promise<ProvisionResult> {
   const supabase = createServiceClient();
   const email = input.email.trim().toLowerCase();
   const tenantName = input.tenant_name?.trim() || email.split("@")[0];
+  const plan = input.plan ?? PLANS.tier1.id;
 
   let userId: string | null = null;
   let userCreated = false;
@@ -92,11 +96,22 @@ export async function provisionTenant(input: {
   if (memberLookupError) throw new Error(memberLookupError.message);
 
   if (existingMember?.tenant_id) {
+    // Repeat call for an existing customer: treat it as a plan change
+    // (upgrade/downgrade from the sales-side automation).
+    if (input.plan) {
+      const { error: planError } = await supabase
+        .from("tenants")
+        .update({ plan })
+        .eq("id", existingMember.tenant_id);
+      if (planError) throw new Error(planError.message);
+    }
+
     return {
       tenant_id: existingMember.tenant_id,
       user_id: userId,
       user_created: userCreated,
-      tenant_created: false
+      tenant_created: false,
+      plan
     };
   }
 
@@ -105,7 +120,8 @@ export async function provisionTenant(input: {
     .from("tenants")
     .insert({
       name: tenantName,
-      slug: `${baseSlug}-${randomSuffix()}`
+      slug: `${baseSlug}-${randomSuffix()}`,
+      plan
     })
     .select("id")
     .single<Pick<Tenant, "id">>();
@@ -124,6 +140,7 @@ export async function provisionTenant(input: {
     tenant_id: tenant.id,
     user_id: userId,
     user_created: userCreated,
-    tenant_created: true
+    tenant_created: true,
+    plan
   };
 }
