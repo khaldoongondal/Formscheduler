@@ -125,7 +125,7 @@ export default async function GhlConnectionsPage({
           {oauthAvailable ? (
             <div className="mb-6">
               <Button asChild className="w-full">
-                <a href="/api/ghl/oauth/start">
+                <a href="/api/connect/start">
                   <PlugZap className="h-4 w-4" />
                   Connect GoHighLevel
                 </a>

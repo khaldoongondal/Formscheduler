@@ -41,7 +41,7 @@ function getOauthEnv() {
 function getRedirectUri() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
   if (!appUrl) throw new Error("Missing NEXT_PUBLIC_APP_URL.");
-  return `${appUrl.replace(/\/$/, "")}/api/ghl/oauth/callback`;
+  return `${appUrl.replace(/\/$/, "")}/api/connect/callback`;
 }
 
 function getStateKey() {
