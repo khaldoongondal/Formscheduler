@@ -10,6 +10,12 @@ export type ProvisionResult = {
   user_created: boolean;
   tenant_created: boolean;
   plan: PlanState;
+  /**
+   * One-time link the customer uses to set their password and reach the admin.
+   * Returned so the sales-side automation (GHL) can embed it in the branded
+   * welcome email instead of relying on a Supabase-sent email.
+   */
+  login_link: string;
 };
 
 function slugify(value: string) {
@@ -30,6 +36,26 @@ function getAppUrl() {
     throw new Error("Missing NEXT_PUBLIC_APP_URL.");
   }
   return appUrl.replace(/\/$/, "");
+}
+
+/**
+ * Generates a one-time set-password link without sending any email. GHL embeds
+ * this in the branded welcome email. Uses a recovery-type link so the customer
+ * lands on /auth/confirm and is routed to /auth/set-password.
+ */
+async function generateLoginLink(email: string) {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo: `${getAppUrl()}/auth/confirm?next=/auth/set-password` }
+  });
+
+  if (error) throw new Error(`Failed to generate login link: ${error.message}`);
+  const hashedToken = data.properties?.hashed_token;
+  if (!hashedToken) throw new Error("Login link generation returned no token.");
+
+  return `${getAppUrl()}/auth/confirm?token_hash=${hashedToken}&type=recovery&next=/auth/set-password`;
 }
 
 async function findUserIdByEmail(email: string) {
@@ -67,24 +93,29 @@ export async function provisionTenant(input: {
   let userId: string | null = null;
   let userCreated = false;
 
-  const { data: invited, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${getAppUrl()}/auth/confirm?next=/auth/set-password`
+  // Create the user without sending any email — GHL sends the branded welcome
+  // email using the login_link this function returns.
+  const { data: created, error: createError } = await supabase.auth.admin.createUser({
+    email,
+    email_confirm: true
   });
 
-  if (inviteError) {
+  if (createError) {
     const alreadyExists =
-      inviteError.status === 422 || /already.*(registered|exists)/i.test(inviteError.message);
+      createError.status === 422 || /already.*(registered|exists)/i.test(createError.message);
     if (!alreadyExists) {
-      throw new Error(`Failed to invite user: ${inviteError.message}`);
+      throw new Error(`Failed to create user: ${createError.message}`);
     }
     userId = await findUserIdByEmail(email);
     if (!userId) {
       throw new Error("User already exists but could not be found by email.");
     }
   } else {
-    userId = invited.user.id;
+    userId = created.user.id;
     userCreated = true;
   }
+
+  const loginLink = await generateLoginLink(email);
 
   const { data: existingMember, error: memberLookupError } = await supabase
     .from("tenant_members")
@@ -111,7 +142,8 @@ export async function provisionTenant(input: {
       user_id: userId,
       user_created: userCreated,
       tenant_created: false,
-      plan
+      plan,
+      login_link: loginLink
     };
   }
 
@@ -141,6 +173,7 @@ export async function provisionTenant(input: {
     user_id: userId,
     user_created: userCreated,
     tenant_created: true,
-    plan
+    plan,
+    login_link: loginLink
   };
 }
