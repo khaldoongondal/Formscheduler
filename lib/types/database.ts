@@ -56,6 +56,11 @@ export interface GhlConnection {
   calendar_id: string | null;
   private_token_ciphertext: string | null;
   token_last_four: string | null;
+  auth_type: "token" | "oauth";
+  access_token_ciphertext: string | null;
+  refresh_token_ciphertext: string | null;
+  token_expires_at: string | null;
+  company_id: string | null;
   api_base_url: string;
   api_version: string;
   is_active: boolean;

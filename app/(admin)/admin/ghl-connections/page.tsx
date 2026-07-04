@@ -1,4 +1,4 @@
-import { CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, PlugZap } from "lucide-react";
 import {
   createGhlConnectionAction,
   deleteGhlConnectionAction,
@@ -7,9 +7,11 @@ import {
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { listGhlConnections } from "@/lib/ghl/connections";
+import { isGhlOauthConfigured } from "@/lib/ghl/oauth";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { SaveSubmitButton } from "@/components/admin/save-submit-button";
 import { SetupRequired } from "@/components/setup/setup-required";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +21,7 @@ export const dynamic = "force-dynamic";
 export default async function GhlConnectionsPage({
   searchParams
 }: {
-  searchParams?: Promise<{ connection?: string; saved?: string }>;
+  searchParams?: Promise<{ connection?: string; saved?: string; error?: string }>;
 }) {
   const missingEnv = getMissingSupabaseAdminEnv();
   if (missingEnv.length > 0) {
@@ -34,9 +36,19 @@ export default async function GhlConnectionsPage({
 
   const tenantId = await getAdminTenantId();
   const connections = await listGhlConnections(tenantId);
+  const oauthAvailable = isGhlOauthConfigured();
   const query = searchParams ? await searchParams : {};
-  const savedConnectionId = query.saved === "connection" || query.saved === "created" ? query.connection : null;
-  const actionSuccess = query.saved === "deleted" ? "GHL connection deleted." : null;
+  const savedConnectionId =
+    query.saved === "connection" || query.saved === "created" || query.saved === "oauth"
+      ? query.connection
+      : null;
+  const actionSuccess =
+    query.saved === "deleted"
+      ? "GHL connection deleted."
+      : query.saved === "oauth"
+        ? "GoHighLevel account connected. Set a default calendar below and you're ready to book."
+        : null;
+  const actionError = query.error ?? null;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
@@ -46,20 +58,31 @@ export default async function GhlConnectionsPage({
           <p className="mt-1 text-sm text-slate-600">Each funnel can point to a different GHL sub-account.</p>
         </div>
         {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
+        {actionError ? <ActionError message={actionError} /> : null}
         <div className="grid gap-4">
           {connections.map((connection) => (
             <Card key={connection.id}>
               <CardContent className="p-5">
                 <form action={updateGhlConnectionAction} className="grid gap-4 md:grid-cols-2">
                   <input type="hidden" name="id" value={connection.id} />
+                  {connection.auth_type === "oauth" ? (
+                    <div className="md:col-span-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                        <PlugZap className="h-3.5 w-3.5" />
+                        Connected via GHL sign-in
+                      </span>
+                    </div>
+                  ) : null}
                   <Field label="Name" name="name" defaultValue={connection.name} />
                   <Field label="Location ID" name="location_id" defaultValue={connection.location_id} />
                   <Field label="Default Calendar ID" name="calendar_id" defaultValue={connection.calendar_id ?? ""} />
                   <Field label="API Version" name="api_version" defaultValue={connection.api_version} />
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>Private Integration Token</Label>
-                    <Input name="private_token" type="password" placeholder={connection.token_last_four ? `Ends in ${connection.token_last_four}` : "Paste token"} />
-                  </div>
+                  {connection.auth_type !== "oauth" ? (
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>Private Integration Token</Label>
+                      <Input name="private_token" type="password" placeholder={connection.token_last_four ? `Ends in ${connection.token_last_four}` : "Paste token"} />
+                    </div>
+                  ) : null}
                   <div className="space-y-2 md:col-span-2">
                     <Label>API Base URL</Label>
                     <Input name="api_base_url" defaultValue={connection.api_base_url} />
@@ -95,10 +118,28 @@ export default async function GhlConnectionsPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Create Connection</CardTitle>
-          <CardDescription>Tokens are stored server-side and never sent to public routes.</CardDescription>
+          <CardTitle>Add Connection</CardTitle>
+          <CardDescription>Credentials are stored encrypted server-side and never sent to public routes.</CardDescription>
         </CardHeader>
         <CardContent>
+          {oauthAvailable ? (
+            <div className="mb-6">
+              <Button asChild className="w-full">
+                <a href="/api/ghl/oauth/start">
+                  <PlugZap className="h-4 w-4" />
+                  Connect GoHighLevel
+                </a>
+              </Button>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                Sign in to GHL and pick a sub-account. Tokens refresh automatically.
+              </p>
+              <div className="mt-4 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
+                <span className="h-px flex-1 bg-slate-200" />
+                or add manually
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
+            </div>
+          ) : null}
           <form action={createGhlConnectionAction} className="space-y-4">
             <Field label="Name" name="name" placeholder="Client A GHL" />
             <Field label="Location ID" name="location_id" />
@@ -117,6 +158,15 @@ export default async function GhlConnectionsPage({
           </form>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function ActionError({ message }: { message: string }) {
+  return (
+    <div className="mb-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-900">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <p className="font-semibold">{message}</p>
     </div>
   );
 }

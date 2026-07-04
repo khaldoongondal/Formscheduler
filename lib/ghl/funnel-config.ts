@@ -1,4 +1,4 @@
-import { getGhlConnection, toGhlRuntimeConfig } from "@/lib/ghl/connections";
+import { getGhlConnection, resolveGhlRuntimeConfig } from "@/lib/ghl/connections";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export async function getFunnelGhlConfig(funnelId: string) {
@@ -27,7 +27,7 @@ export async function getFunnelGhlConfig(funnelId: string) {
   return {
     funnel,
     connection,
-    config: toGhlRuntimeConfig(connection),
+    config: await resolveGhlRuntimeConfig(connection),
     calendarId,
     slotDurationMinutes: funnel.slot_duration_minutes,
     availabilityWindowDays: funnel.availability_window_days ?? 14
