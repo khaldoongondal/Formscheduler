@@ -78,7 +78,7 @@ export default async function GhlConnectionsPage({
                   <ConfirmDeleteButton
                     label="Delete"
                     title="Delete this GHL connection?"
-                    description={`This permanently removes "${connection.name}" from Leadder. Funnels using this connection will need another GHL connection selected before they can book properly.`}
+                    description={`This permanently removes "${connection.name}" from FormBook. Funnels using this connection will need another GHL connection selected before they can book properly.`}
                     size="sm"
                   />
                 </form>

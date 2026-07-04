@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Leadder Scheduler",
+  title: "FormBook",
   description: "Conversion-first booking funnels backed by GoHighLevel."
 };
 

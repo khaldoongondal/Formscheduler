@@ -189,7 +189,7 @@ export async function createOpportunity(
       locationId: config.locationId,
       name: input.name,
       status: input.status ?? "open",
-      source: input.source ?? "Leadder Scheduler"
+      source: input.source ?? "FormBook"
     })
   });
 }
@@ -212,7 +212,7 @@ export async function updateOpportunity(
       pipelineStageId: input.pipelineStageId,
       name: input.name,
       status: input.status ?? "open",
-      source: input.source ?? "Leadder Scheduler"
+      source: input.source ?? "FormBook"
     })
   });
 }

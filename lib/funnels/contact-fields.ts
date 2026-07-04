@@ -16,7 +16,7 @@ export const contactFieldOptions: Array<{ key: ContactFieldKey; label: string; d
   {
     key: "full_name",
     label: "Name",
-    description: "One lower-friction name field. Leadder splits it into first and last name for GHL."
+    description: "One lower-friction name field. FormBook splits it into first and last name for GHL."
   },
   { key: "phone", label: "Phone Number", description: "Recommended for call booking and SMS follow-up." },
   { key: "first_name", label: "First Name", description: "Used to personalize the lead and GHL contact." },

@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Privacy Policy | Leadder Scheduler"
+  title: "Privacy Policy | FormBook"
 };
 
 export default function PrivacyPage() {
@@ -12,7 +12,7 @@ export default function PrivacyPage() {
         <section>
           <h2 className="mb-2 text-lg font-semibold text-slate-900">1. Overview</h2>
           <p>
-            Leadder Scheduler, operated by Gondal Tech, provides qualification forms and booking
+            FormBook, operated by Gondal Tech, provides qualification forms and booking
             pages on behalf of the businesses that use our platform. When you fill out a form or
             book an appointment, we collect information as a <strong>processor</strong> on behalf of
             that business (the <strong>controller</strong> of your data).

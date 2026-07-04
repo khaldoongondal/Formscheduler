@@ -14,9 +14,7 @@ export default function HomePage() {
     <main className="min-h-screen bg-white">
       <section className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-6 py-16">
         <div className="max-w-3xl">
-          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
-            Leadder Scheduler MVP
-          </p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-primary">FormBook</p>
           <h1 className="mt-4 text-5xl font-semibold tracking-tight text-slate-950 md:text-6xl">
             Qualify leads before calendar slots appear.
           </h1>
@@ -36,7 +34,7 @@ export default function HomePage() {
         <div className="mt-14 grid gap-4 md:grid-cols-3">
           {features.map(({ title, body, Icon }) => (
             <div key={title} className="rounded-lg border bg-white p-5 shadow-sm">
-              <Icon className="h-5 w-5 text-emerald-700" />
+              <Icon className="h-5 w-5 text-primary" />
               <h2 className="mt-4 font-semibold text-slate-950">{title}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
             </div>

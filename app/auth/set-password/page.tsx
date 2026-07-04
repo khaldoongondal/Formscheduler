@@ -16,12 +16,12 @@ export default async function SetPasswordPage({
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-slate-950 text-white">
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <KeyRound className="h-5 w-5" />
           </div>
           <CardTitle>Set your password</CardTitle>
           <p className="text-sm text-slate-500">
-            Welcome! Choose a password to finish setting up your account.
+            Welcome to FormBook! Choose a password to finish setting up your account.
           </p>
         </CardHeader>
         <CardContent>

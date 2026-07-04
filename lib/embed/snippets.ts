@@ -116,7 +116,7 @@ function appendQueryParams(url: string, params: Record<string, string>) {
 function buildGhlSafeIframeSnippet(embedUrl: string) {
   const embedOrigin = new URL(embedUrl).origin;
 
-  return `<!-- Leadder iframe embed -->
+  return `<!-- FormBook iframe embed -->
 <div></div>
 <script>
 (function () {

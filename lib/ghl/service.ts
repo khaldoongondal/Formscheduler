@@ -205,7 +205,7 @@ function truncateNoteBody(body: string) {
     return body;
   }
 
-  return `${body.slice(0, MAX_GHL_NOTE_BODY_LENGTH - 40).trimEnd()}\n\n[Truncated by Leadder]`;
+  return `${body.slice(0, MAX_GHL_NOTE_BODY_LENGTH - 40).trimEnd()}\n\n[Truncated by FormBook]`;
 }
 
 export async function upsertLeadContact(
@@ -258,7 +258,7 @@ export async function createLeadAnswersContactNote(
 
   const body = truncateNoteBody(
     [
-      "Leadder survey answers",
+      "FormBook survey answers",
       `Lead session: ${leadSession.id}`,
       leadSession.source_url ? `Source URL: ${leadSession.source_url}` : null,
       "",
@@ -270,7 +270,7 @@ export async function createLeadAnswersContactNote(
 
   return createContactNote(config, {
     contactId,
-    title: "Leadder Survey Answers",
+    title: "FormBook Survey Answers",
     body,
     color: "#4f9a78",
     pinned: false
@@ -351,7 +351,7 @@ export async function ensureGhlOpportunity(input: {
     pipelineStageId,
     name: buildOpportunityName(input.funnel, input.leadSession),
     status: "open" as const,
-    source: `Leadder:${input.funnel.slug}`
+    source: `FormBook:${input.funnel.slug}`
   };
 
   const result = opportunityId

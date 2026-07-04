@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Terms of Service | Leadder Scheduler"
+  title: "Terms of Service | FormBook"
 };
 
 export default function TermsPage() {
@@ -12,7 +12,7 @@ export default function TermsPage() {
         <section>
           <h2 className="mb-2 text-lg font-semibold text-slate-900">1. Who we are</h2>
           <p>
-            Leadder Scheduler (&quot;the Service&quot;) is a lead qualification and appointment
+            FormBook (&quot;the Service&quot;) is a lead qualification and appointment
             scheduling platform operated by Gondal Tech (&quot;we&quot;, &quot;us&quot;). The Service
             lets businesses build qualification forms and booking pages that schedule appointments
             into their own CRM and calendar systems.

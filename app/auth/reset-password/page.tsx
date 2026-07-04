@@ -17,7 +17,7 @@ export default async function ResetPasswordPage({
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-slate-950 text-white">
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <MailQuestion className="h-5 w-5" />
           </div>
           <CardTitle>Reset your password</CardTitle>

@@ -56,7 +56,7 @@ export async function getTenantPlanState(tenantId: string): Promise<PlanState> {
 }
 
 const SUSPENDED_MESSAGE =
-  "This account is suspended. Renew your subscription to keep using Leadder Scheduler.";
+  "This account is suspended. Renew your subscription to keep using FormBook.";
 
 export async function getTenantPlan(tenantId: string): Promise<PlanLimits> {
   const state = await getTenantPlanState(tenantId);
