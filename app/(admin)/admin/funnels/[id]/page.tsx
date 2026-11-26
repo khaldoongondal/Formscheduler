@@ -44,6 +44,8 @@ import {
   resolveAnalyticsTrafficSources
 } from "@/lib/analytics/country-filter";
 import { getAdminTenantId } from "@/lib/auth/tenant";
+import { getTenantPlanSummary } from "@/lib/billing/plan-service";
+import { activeLimitMessage } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { buildIframeSnippet, buildPopupSnippet, buildSplitTestIframeSnippet } from "@/lib/embed/snippets";
 import {
@@ -125,10 +127,15 @@ export default async function FunnelDetailPage({
     from: query.from,
     to: query.to
   });
-  const [connections, analytics] = await Promise.all([
+  const [connections, analytics, planSummary] = await Promise.all([
     listGhlConnections(funnel.tenant_id),
-    getFunnelAnalytics(funnel.id, analyticsRange)
+    getFunnelAnalytics(funnel.id, analyticsRange),
+    getTenantPlanSummary(funnel.tenant_id)
   ]);
+  const activeLimitHint =
+    !funnel.is_published && planSummary.plan && planSummary.usage.activeForms >= planSummary.plan.maxActiveForms
+      ? activeLimitMessage(planSummary.plan)
+      : null;
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const bookUrl = `${baseUrl}/book/${funnel.slug}`;
@@ -329,12 +336,19 @@ export default async function FunnelDetailPage({
                       description="Displays the paragraph under the headline on the first step."
                     />
                   </div>
-                  <ToggleSetting
-                    name="is_published"
-                    defaultChecked={funnel.is_published}
-                    title="Published"
-                    description="Published funnels are visible on the public /book and /embed links."
-                  />
+                  <div className="space-y-2">
+                    <ToggleSetting
+                      name="is_published"
+                      defaultChecked={funnel.is_published}
+                      title="Active"
+                      description="Active forms are live on their /book and /embed links. Drafts are only visible to you."
+                    />
+                    {activeLimitHint ? (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                        {activeLimitHint}
+                      </p>
+                    ) : null}
+                  </div>
                 </SettingsGroup>
 
                 <SettingsGroup
@@ -827,7 +841,7 @@ export default async function FunnelDetailPage({
           <Card id="embed-links">
             <CardHeader>
               <SectionTitle icon={<Code2 className="h-5 w-5" />} title="Embed and links" />
-              <CardDescription>Use these after the funnel is published.</CardDescription>
+              <CardDescription>Use these after the form is active.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <section className="grid gap-4 xl:grid-cols-3">
@@ -1570,7 +1584,7 @@ function StatusBadge({ published }: { published: boolean }) {
           : "rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600"
       }
     >
-      {published ? "Published" : "Draft"}
+      {published ? "Active" : "Draft"}
     </span>
   );
 }

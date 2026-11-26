@@ -35,7 +35,7 @@ export interface Tenant {
   id: string;
   name: string;
   slug: string;
-  plan: "tier1" | "tier2" | "tier3" | "suspended";
+  plan: "free" | "scaling" | "suspended";
   created_at: string;
   updated_at: string;
 }
@@ -237,6 +237,16 @@ export interface AnalyticsEvent {
   created_at: string;
 }
 
+export interface PlanLimitsRow {
+  plan: "free" | "scaling" | "suspended";
+  display_name: string;
+  monthly_price_cents: number;
+  max_active_forms: number;
+  max_draft_forms: number;
+  max_pixels: number;
+  updated_at: string;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -251,6 +261,7 @@ export interface Database {
       lead_answers: Table<LeadAnswer>;
       booking_attempts: Table<BookingAttempt>;
       analytics_events: Table<AnalyticsEvent>;
+      plan_limits: Table<PlanLimitsRow>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

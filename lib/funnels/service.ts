@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
-import { assertCanCreateFunnel, assertCanUseCalendar, isTenantSuspended } from "@/lib/billing/plans";
+import { assertFormLimit, isTenantSuspended, planLimitMessageForTenant } from "@/lib/billing/plan-service";
+import { planLimitMessageFromError } from "@/lib/billing/plans";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel, Question, QuestionOption } from "@/lib/types/database";
 import { mergeContactFieldSettings, resolveContactFieldConfig } from "@/lib/funnels/contact-fields";
@@ -274,8 +275,8 @@ function getMissingInsertColumn(message: string, payload: Record<string, unknown
 
 export async function createFunnel(input: unknown) {
   const parsed = createFunnelSchema.parse(input);
-  await assertCanCreateFunnel(parsed.tenant_id);
-  await assertCanUseCalendar(parsed.tenant_id, parsed.calendar_id);
+  // New forms are always drafts (the create schema has no is_published).
+  await assertFormLimit(parsed.tenant_id, "create_draft");
   const supabase = createServiceClient();
   const {
     contact_field_order: contactFieldOrder,
@@ -321,6 +322,9 @@ export async function createFunnel(input: unknown) {
     const { data, error } = await supabase.from("funnels").insert(insertPayload).select("*").single();
     if (!error) return data;
 
+    const friendly = await planLimitMessageForTenant(error.message, parsed.tenant_id);
+    if (friendly) throw new Error(friendly);
+
     const missingColumn = getMissingInsertColumn(error.message, insertPayload);
     if (!missingColumn) throw new Error(error.message);
     delete insertPayload[missingColumn];
@@ -344,14 +348,18 @@ export async function updateFunnel(input: unknown) {
     theme,
     ...funnel
   } = parsed;
-  if (Object.prototype.hasOwnProperty.call(funnel, "calendar_id") && funnel.calendar_id) {
+  let existingTenantId: string | null = null;
+  if (funnel.is_published === true) {
     const { data: existing, error: existingError } = await supabase
       .from("funnels")
-      .select("tenant_id")
+      .select("tenant_id,is_published")
       .eq("id", id)
       .single();
     if (existingError) throw new Error(existingError.message);
-    await assertCanUseCalendar(existing.tenant_id, funnel.calendar_id, id);
+    existingTenantId = existing.tenant_id;
+    if (!existing.is_published) {
+      await assertFormLimit(existing.tenant_id, "activate", id);
+    }
   }
 
   const hasQualificationRuleUpdates =
@@ -443,15 +451,30 @@ export async function updateFunnel(input: unknown) {
     .select("*")
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (planLimitMessageFromError(error.message)) {
+      const tenantId = existingTenantId ?? (await getFunnelTenantId(id));
+      const friendly = tenantId
+        ? await planLimitMessageForTenant(error.message, tenantId)
+        : planLimitMessageFromError(error.message);
+      if (friendly) throw new Error(friendly);
+    }
+    throw new Error(error.message);
+  }
   return data;
+}
+
+async function getFunnelTenantId(id: string): Promise<string | null> {
+  const supabase = createServiceClient();
+  const { data } = await supabase.from("funnels").select("tenant_id").eq("id", id).maybeSingle();
+  return data?.tenant_id ?? null;
 }
 
 export async function duplicateFunnel(id: string) {
   const source = await getFunnelById(id);
   if (!source) throw new Error("Funnel not found.");
 
-  await assertCanCreateFunnel(source.tenant_id);
+  await assertFormLimit(source.tenant_id, "create_draft");
 
   const supabase = createServiceClient();
   const duplicatedSlug = `${source.slug}-copy-${Date.now().toString(36)}`;
@@ -471,7 +494,10 @@ export async function duplicateFunnel(id: string) {
     .select("*")
     .single();
 
-  if (funnelError) throw new Error(funnelError.message);
+  if (funnelError) {
+    const friendly = await planLimitMessageForTenant(funnelError.message, source.tenant_id);
+    throw new Error(friendly ?? funnelError.message);
+  }
 
   for (const question of questions) {
     const { options, ...sourceQuestion } = question;

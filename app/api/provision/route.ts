@@ -2,13 +2,18 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { fail, ok } from "@/lib/api/responses";
+import { parsePlanState } from "@/lib/billing/plans";
 import { provisionTenant } from "@/lib/provisioning/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 const provisionSchema = z.object({
   email: z.string().email(),
   tenant_name: z.string().min(1).max(120).optional(),
-  plan: z.enum(["tier1", "tier2", "tier3", "suspended"]).optional()
+  // Legacy tier1/tier2/tier3 from older GoHighLevel workflows map to "scaling".
+  plan: z
+    .enum(["free", "scaling", "suspended", "tier1", "tier2", "tier3"])
+    .optional()
+    .transform((p) => (p === undefined ? undefined : parsePlanState(p)))
 });
 
 function isAuthorized(request: NextRequest) {

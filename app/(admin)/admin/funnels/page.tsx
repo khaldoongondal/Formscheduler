@@ -2,8 +2,11 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, ExternalLink, Plus } from "lucide-react";
 import { createFunnelAction } from "@/app/(admin)/admin/funnels/actions";
 import { getAdminTenantId } from "@/lib/auth/tenant";
+import { getTenantPlanSummary } from "@/lib/billing/plan-service";
+import { SUSPENDED_MESSAGE, draftLimitMessage } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { listFunnels } from "@/lib/funnels/service";
+import { PlanUsage } from "@/components/admin/plan-usage";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,11 +33,18 @@ export default async function FunnelsPage({
   }
 
   const tenantId = await getAdminTenantId();
-  const funnels = await listFunnels(tenantId);
+  const [funnels, planSummary] = await Promise.all([listFunnels(tenantId), getTenantPlanSummary(tenantId)]);
   const query = searchParams ? await searchParams : {};
   const actionError = typeof query.error === "string" ? query.error : null;
   const actionSuccess = query.saved === "deleted" ? "Funnel deleted." : null;
   const showCreateForm = query.create === "1" || funnels.length === 0;
+  const isSuspended = planSummary.state === "suspended" || !planSummary.plan;
+  const draftsFull = planSummary.plan ? planSummary.usage.draftForms >= planSummary.plan.maxDraftForms : false;
+  const createBlockedMessage = isSuspended
+    ? SUSPENDED_MESSAGE
+    : draftsFull && planSummary.plan
+      ? draftLimitMessage(planSummary.plan)
+      : null;
 
   return (
     <div className="space-y-8">
@@ -46,18 +56,29 @@ export default async function FunnelsPage({
             Choose a funnel to manage its questions, GHL handoff, theme, booking links, and performance.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link href="/admin/funnels?create=1#create-funnel">
+        {isSuspended ? null : draftsFull ? (
+          <Button type="button" variant="outline" disabled>
             <Plus className="h-4 w-4" />
             New funnel
-          </Link>
-        </Button>
+          </Button>
+        ) : (
+          <Button asChild variant="outline">
+            <Link href="/admin/funnels?create=1#create-funnel">
+              <Plus className="h-4 w-4" />
+              New funnel
+            </Link>
+          </Button>
+        )}
       </div>
+
+      <PlanUsage state={planSummary.state} plan={planSummary.plan} usage={planSummary.usage} />
 
       {actionError ? <ActionError message={actionError} /> : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
 
-      {showCreateForm ? <CreateFunnelCard canCancel={funnels.length > 0} /> : null}
+      {showCreateForm ? (
+        <CreateFunnelCard canCancel={funnels.length > 0} blockedMessage={createBlockedMessage} />
+      ) : null}
 
       <section className="grid gap-4">
         {funnels.map((funnel) => (
@@ -109,7 +130,7 @@ export default async function FunnelsPage({
   );
 }
 
-function CreateFunnelCard({ canCancel }: { canCancel: boolean }) {
+function CreateFunnelCard({ canCancel, blockedMessage }: { canCancel: boolean; blockedMessage: string | null }) {
   return (
     <Card id="create-funnel" className="max-w-3xl scroll-mt-24">
         <CardHeader>
@@ -117,6 +138,11 @@ function CreateFunnelCard({ canCancel }: { canCancel: boolean }) {
           <CardDescription>Start with the essentials. Theme, GHL, questions, and analytics live inside the funnel workspace.</CardDescription>
         </CardHeader>
         <CardContent>
+          {blockedMessage ? (
+            <p className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+              {blockedMessage}
+            </p>
+          ) : null}
           <form action={createFunnelAction} className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
@@ -137,7 +163,7 @@ function CreateFunnelCard({ canCancel }: { canCancel: boolean }) {
               />
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit">
+              <Button type="submit" disabled={Boolean(blockedMessage)}>
                 <Plus className="h-4 w-4" />
                 Create draft funnel
               </Button>
@@ -180,7 +206,7 @@ function StatusBadge({ published }: { published: boolean }) {
           : "rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600"
       }
     >
-      {published ? "Published" : "Draft"}
+      {published ? "Active" : "Draft"}
     </span>
   );
 }

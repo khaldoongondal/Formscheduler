@@ -1,4 +1,4 @@
-import { PLANS, type PlanState } from "@/lib/billing/plans";
+import type { PlanState } from "@/lib/billing/plans";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Tenant } from "@/lib/types/database";
 
@@ -88,7 +88,7 @@ export async function provisionTenant(input: {
   const supabase = createServiceClient();
   const email = input.email.trim().toLowerCase();
   const tenantName = input.tenant_name?.trim() || email.split("@")[0];
-  const plan = input.plan ?? PLANS.tier1.id;
+  const plan: PlanState = input.plan ?? "free";
 
   let userId: string | null = null;
   let userCreated = false;
