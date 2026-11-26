@@ -1,90 +1,117 @@
+import Link from "next/link";
+import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page";
+import { CONTACT_EMAIL } from "@/lib/billing/plans";
+
 export const metadata = {
-  title: "Privacy Policy | FormBook"
+  title: "Privacy Policy | FormBook",
+  description: "How FormBook, a tool from Gondal Tech, handles personal data."
 };
 
 export default function PrivacyPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-3xl font-bold text-slate-900">Privacy Policy</h1>
-      <p className="mt-2 text-sm text-slate-500">Last updated: July 3, 2026</p>
+    <LegalPage
+      title="Privacy Policy"
+      intro={
+        <p>
+          This policy explains how Gondal Tech handles personal data in FormBook. It covers two groups of people:
+          businesses that hold a FormBook account, and people who fill in a form that one of those businesses published.
+        </p>
+      }
+    >
+      <LegalSection title="1. Account holders">
+        <p>When you create an account we collect:</p>
+        <LegalList
+          items={[
+            "your name, email address, phone number, business name and website, as entered at signup;",
+            "sign-in data, such as your email address, a protected version of your password and sign-in times;",
+            "usage data, such as the forms you create, settings you change and basic technical details about your browser."
+          ]}
+        />
+        <p>We use this data to:</p>
+        <LegalList
+          items={[
+            "run FormBook and keep your account secure;",
+            "contact you about your account, including verification and password emails, and the optional free setup call;",
+            "follow up with you about Gondal Tech services. You can opt out of this at any time by emailing us."
+          ]}
+        />
+      </LegalSection>
 
-      <div className="mt-8 space-y-6 text-sm leading-6 text-slate-700">
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">1. Overview</h2>
-          <p>
-            FormBook, operated by Gondal Tech, provides qualification forms and booking
-            pages on behalf of the businesses that use our platform. When you fill out a form or
-            book an appointment, we collect information as a <strong>processor</strong> on behalf of
-            that business (the <strong>controller</strong> of your data).
-          </p>
-        </section>
+      <LegalSection title="2. People who fill in a form">
+        <p>
+          Each form belongs to the business that published it. That business is the controller of the answers you give
+          and decides what happens to them. FormBook processes your answers on that business&apos;s instructions, for
+          example to save your details, check whether a call is a fit, and book a call in the business&apos;s
+          calendar. Questions about your data, including requests to see or delete it, should go to that business
+          first. If you cannot reach them, email us and we will pass your request on.
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">2. What we collect</h2>
-          <p>When you interact with a booking page we may collect:</p>
-          <ul className="mt-2 list-disc space-y-1 pl-6">
-            <li>Contact details you provide (name, email address, phone number)</li>
-            <li>Your answers to the qualification questions on the form</li>
-            <li>The appointment time you select</li>
-            <li>
-              Technical data: IP address, browser user agent, referring page, UTM campaign
-              parameters, approximate country, and a browser-generated visitor identifier used to
-              measure funnel performance
-            </li>
-          </ul>
-        </section>
+      <LegalSection title="3. Subprocessors">
+        <p>We use these services to run FormBook:</p>
+        <LegalList
+          items={[
+            "Supabase: database and sign-in.",
+            "Vercel: hosting.",
+            "GoHighLevel: the customer's own CRM and calendar, where leads and bookings are sent, and Gondal Tech's own CRM for account emails.",
+            "Cloudflare Turnstile, when enabled: a check that a signup comes from a person and not a bot.",
+            "Meta: only when a customer connects a Meta pixel to a form."
+          ]}
+        />
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">3. How your data is used</h2>
-          <p>
-            Your information is used to schedule your appointment, route your enquiry to the right
-            team, and give the business you are booking with analytics about their booking pages.
-            Your contact details, answers, and appointment are transmitted to the business&apos;s
-            CRM and calendar system (GoHighLevel). We do not sell your personal information or use
-            it for advertising.
-          </p>
-        </section>
+      <LegalSection title="4. Data sent to Meta">
+        <p>
+          When a customer connects a Meta pixel to a form, FormBook sends form events and hashed contact data (such as
+          a hashed email address and phone number) to Meta on that customer&apos;s instruction, and only to the pixel the
+          customer supplied. The customer is responsible for telling people about this and getting any consent it needs.
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">4. Retention and deletion</h2>
-          <p>
-            We retain lead and booking records for as long as the business customer maintains an
-            active account, after which data is deleted within a commercially reasonable period. To
-            request access to or deletion of your personal data, contact the business you booked
-            with, or email us at the address below and we will assist or forward your request to
-            the responsible business.
-          </p>
-        </section>
+      <LegalSection title="5. Retention">
+        <LegalList
+          items={[
+            "Account data is kept while the account is open and for a reasonable period after it closes, for example to answer questions or meet legal duties.",
+            "Lead data is kept until the customer deletes it or asks us to delete it.",
+            "Security logs and rate-limit counters are short-lived and removed automatically."
+          ]}
+        />
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">5. Security</h2>
-          <p>
-            Data is stored with access controls and row-level security, transmitted over TLS, and
-            third-party API credentials are encrypted at rest. No method of transmission or storage
-            is completely secure, but we work to protect your information using industry-standard
-            practices.
-          </p>
-        </section>
+      <LegalSection title="6. Your rights and deletion requests">
+        <p>
+          Depending on where you live, you may have the right to see, correct or delete your personal data, or to
+          object to how it is used. Account holders can make these requests by emailing{" "}
+          <a className="font-semibold underline underline-offset-2" href={`mailto:${CONTACT_EMAIL}`}>
+            {CONTACT_EMAIL}
+          </a>
+          . People who filled in a form should contact the business that owns the form, as explained above.
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">6. Your rights</h2>
-          <p>
-            Depending on your location, you may have rights to access, correct, delete, or restrict
-            processing of your personal data (including under the GDPR and CCPA). We support the
-            businesses we work with in honoring these requests.
-          </p>
-        </section>
+      <LegalSection title="7. Cookies and local storage">
+        <LegalList
+          items={[
+            "The FormBook admin uses sign-in cookies to keep you signed in.",
+            "Public forms keep a random visitor id in your browser's local storage so the business can count views and starts for its form."
+          ]}
+        />
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">7. Contact</h2>
-          <p>
-            Privacy questions or requests:{" "}
-            <a className="font-semibold underline underline-offset-2" href="mailto:khaldoon@gondaltech.com">
-              khaldoon@gondaltech.com
-            </a>
-          </p>
-        </section>
-      </div>
-    </main>
+      <LegalSection title="8. Changes and contact">
+        <p>
+          We may update this policy and will change the date at the top of the page when we do. Questions go to{" "}
+          {CONTACT_EMAIL}. See also the{" "}
+          <Link className="font-semibold underline underline-offset-2" href="/dpa">
+            Data Processing Addendum
+          </Link>{" "}
+          and the{" "}
+          <Link className="font-semibold underline underline-offset-2" href="/terms">
+            Terms of Service
+          </Link>
+          .
+        </p>
+      </LegalSection>
+    </LegalPage>
   );
 }

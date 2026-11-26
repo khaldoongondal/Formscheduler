@@ -1,92 +1,154 @@
+import Link from "next/link";
+import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page";
+import { CONTACT_EMAIL, PLANS, formatPlanPrice } from "@/lib/billing/plans";
+
 export const metadata = {
-  title: "Terms of Service | FormBook"
+  title: "Terms of Service | FormBook",
+  description: "The terms for using FormBook, a tool from Gondal Tech."
 };
+
+const free = PLANS.free;
+const scaling = PLANS.scaling;
 
 export default function TermsPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-3xl font-bold text-slate-900">Terms of Service</h1>
-      <p className="mt-2 text-sm text-slate-500">Last updated: July 3, 2026</p>
+    <LegalPage
+      title="Terms of Service"
+      intro={
+        <p>
+          These terms apply when you create a FormBook account or use FormBook to publish forms. If you use FormBook
+          for a business, you confirm that you can accept these terms for that business.
+        </p>
+      }
+    >
+      <LegalSection title="1. Who we are">
+        <p>
+          FormBook is a tool from Gondal Tech (&quot;Gondal Tech&quot;, &quot;we&quot;, &quot;us&quot;). It lets
+          businesses build short qualifying forms and booking pages that save leads and book calls into the
+          business&apos;s own GoHighLevel account. You can reach us at{" "}
+          <a className="font-semibold underline underline-offset-2" href={`mailto:${CONTACT_EMAIL}`}>
+            {CONTACT_EMAIL}
+          </a>
+          .
+        </p>
+      </LegalSection>
 
-      <div className="mt-8 space-y-6 text-sm leading-6 text-slate-700">
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">1. Who we are</h2>
-          <p>
-            FormBook (&quot;the Service&quot;) is a lead qualification and appointment
-            scheduling platform operated by Gondal Tech (&quot;we&quot;, &quot;us&quot;). The Service
-            lets businesses build qualification forms and booking pages that schedule appointments
-            into their own CRM and calendar systems.
-          </p>
-        </section>
+      <LegalSection title="2. Accounts">
+        <LegalList
+          items={[
+            "Give accurate details when you sign up and keep them up to date.",
+            "You must verify your email address before the account works.",
+            "One person is responsible for each account and for everything done with it.",
+            "Keep your password safe and tell us straight away if you think someone else has used your account."
+          ]}
+        />
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">2. Acceptance of terms</h2>
-          <p>
-            By creating an account, submitting a form, or booking an appointment through the
-            Service, you agree to these Terms. If you use the Service on behalf of a business, you
-            represent that you have authority to bind that business.
-          </p>
-        </section>
+      <LegalSection title="3. Plans">
+        <LegalList
+          items={[
+            `${free.name}: ${formatPlanPrice(free)}. Up to ${free.maxActiveForms} active forms and ${free.maxDraftForms} drafts.`,
+            `${scaling.name}: ${formatPlanPrice(scaling)}. Up to ${scaling.maxActiveForms} active forms and ${scaling.maxDraftForms} drafts.`
+          ]}
+        />
+        <p>
+          Until online checkout launches, billing for the {scaling.name} plan is arranged directly with Gondal Tech.
+          We may change plan limits or prices. We will give you notice before a change affects your account. A change
+          never removes forms you already have; it can stop you from activating more until you are under the new limit.
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">3. Accounts and subscriptions</h2>
-          <p>
-            Business customers subscribe to a paid plan that limits the number of forms and
-            calendars they may use. Fees are billed in advance and are non-refundable except where
-            required by law. We may suspend accounts with unpaid balances. You are responsible for
-            safeguarding your login credentials and for all activity under your account.
-          </p>
-        </section>
+      <LegalSection title="4. The FormBook badge">
+        <p>
+          Forms on the free {free.name} plan may show a small &quot;Powered by FormBook&quot; link under the form.
+          Forms on the {scaling.name} plan do not show it.
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">4. Acceptable use</h2>
-          <p>
-            You may not use the Service to send spam, collect data unlawfully, impersonate others,
-            probe or disrupt our infrastructure, or collect information from children under 16. We
-            may suspend or terminate accounts that violate these rules.
-          </p>
-        </section>
+      <LegalSection title="5. Your content and your leads">
+        <p>
+          You own your forms, your content and the lead data your forms collect. You give Gondal Tech the rights we
+          need to host, process, display and send that content and data in order to run FormBook for you, as described
+          in the{" "}
+          <Link className="font-semibold underline underline-offset-2" href="/privacy">
+            Privacy Policy
+          </Link>{" "}
+          and the{" "}
+          <Link className="font-semibold underline underline-offset-2" href="/dpa">
+            Data Processing Addendum
+          </Link>
+          .
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">5. Customer data</h2>
-          <p>
-            Business customers own the lead and booking data collected through their forms. We
-            process that data on their behalf to operate the Service, as described in our{" "}
-            <a className="font-semibold underline underline-offset-2" href="/privacy">
-              Privacy Policy
-            </a>
-            . Appointment, contact, and CRM records are transmitted to the customer&apos;s connected
-            systems (such as GoHighLevel), which remain the customer&apos;s systems of record.
-          </p>
-        </section>
+      <LegalSection title="6. Acceptable use">
+        <p>You must not use FormBook to:</p>
+        <LegalList
+          items={[
+            "run phishing, or trick people into giving away sign-in details or money;",
+            "collect passwords, payment card numbers or bank login details through a form;",
+            "send or support spam;",
+            "pretend to be another person, business or organisation;",
+            "publish or collect anything illegal;",
+            "mislead people about who is collecting their data or why;",
+            "probe, overload or disrupt FormBook or try to get around its limits."
+          ]}
+        />
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">6. Availability and changes</h2>
-          <p>
-            We aim for high availability but do not guarantee uninterrupted service. We may modify
-            or discontinue features with reasonable notice to paying customers. We may update these
-            Terms; continued use after an update constitutes acceptance.
-          </p>
-        </section>
+      <LegalSection title="7. Third-party services">
+        <p>
+          GoHighLevel, and Meta if you connect a pixel, are your own accounts with those companies. Your use of them is
+          under their terms, and they are responsible for their own services. We are not responsible for changes or
+          outages on their side.
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">7. Disclaimers and liability</h2>
-          <p>
-            The Service is provided &quot;as is&quot; without warranties of any kind. To the maximum
-            extent permitted by law, our total liability arising out of the Service is limited to
-            the fees paid by you in the twelve months preceding the claim. We are not liable for
-            indirect, incidental, or consequential damages, or for the acts of third-party services
-            connected to your account.
-          </p>
-        </section>
+      <LegalSection title="8. Suspension and takedown">
+        <p>
+          We may take down a form, or suspend an account, that breaks these terms or puts people at risk. Where it is
+          safe to do so, we will tell you why. Anyone can report a form with the &quot;Report this form&quot; link
+          shown under every public form, and we review every report.
+        </p>
+      </LegalSection>
 
-        <section>
-          <h2 className="mb-2 text-lg font-semibold text-slate-900">8. Contact</h2>
-          <p>
-            Questions about these Terms: <a className="font-semibold underline underline-offset-2" href="mailto:khaldoon@gondaltech.com">khaldoon@gondaltech.com</a>
-          </p>
-        </section>
-      </div>
-    </main>
+      <LegalSection title="9. Ending the service and deletion requests">
+        <p>
+          You can stop using FormBook at any time and ask us to delete your account and data by emailing{" "}
+          {CONTACT_EMAIL}. We may end the service for an account with notice, or straight away for a serious breach of
+          these terms. Data already sent to your GoHighLevel or Meta accounts stays there under your control.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="10. Disclaimers and limitation of liability">
+        <p>
+          FormBook is provided as it is and as available. We work to keep it running and secure, but we do not promise
+          that it will always be available, free of errors, or that it will produce any particular business result.
+        </p>
+        <p>
+          To the extent the law allows, Gondal Tech is not liable for indirect or consequential losses, such as lost
+          profits, lost leads or lost data, and our total liability is limited to the amount you paid us for FormBook
+          in the period before the claim. Nothing in these terms limits liability that cannot be limited by law.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="11. Changes to these terms and governing law">
+        <p>
+          We may update these terms. We will change the date at the top of this page and tell account holders by email
+          about important changes. Continuing to use FormBook after a change means you accept the new terms.
+        </p>
+        <p>These terms are governed by the laws of [Owner to confirm governing law].</p>
+      </LegalSection>
+
+      <LegalSection title="12. Contact">
+        <p>
+          Questions about these terms go to{" "}
+          <a className="font-semibold underline underline-offset-2" href={`mailto:${CONTACT_EMAIL}`}>
+            {CONTACT_EMAIL}
+          </a>
+          .
+        </p>
+      </LegalSection>
+    </LegalPage>
   );
 }

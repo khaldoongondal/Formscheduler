@@ -42,6 +42,11 @@ export interface Tenant {
   business_name: string | null;
   website: string | null;
   signup_source: "legacy" | "provisioned" | "self_serve";
+  /** Owner switch for the "Powered by FormBook" badge (free plan only). */
+  badge_enabled: boolean;
+  plan_before_suspension: "free" | "scaling" | null;
+  suspended_at: string | null;
+  suspension_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -294,6 +299,42 @@ export interface SignupRequest {
   completed_at: string | null;
 }
 
+export type OwnerAuditAction =
+  | "set_plan"
+  | "set_badge"
+  | "suspend"
+  | "restore"
+  | "take_down_form"
+  | "restore_form"
+  | "resolve_report";
+
+export interface OwnerAuditLog {
+  id: string;
+  actor_email: string;
+  action: OwnerAuditAction;
+  target_type: "tenant" | "funnel" | "report";
+  target_id: string;
+  details: Json;
+  created_at: string;
+}
+
+export interface OwnerClientListRow {
+  tenant_id: string;
+  tenant_name: string;
+  business_name: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  owner_email: string | null;
+  plan: string;
+  badge_enabled: boolean;
+  active_forms: number;
+  draft_forms: number;
+  leads_30d: number;
+  open_reports: number;
+  last_activity_at: string | null;
+  created_at: string;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -312,6 +353,7 @@ export interface Database {
       rate_limit_counters: Table<RateLimitCounter>;
       form_reports: Table<FormReport>;
       signup_requests: Table<SignupRequest>;
+      owner_audit_log: Table<OwnerAuditLog>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -330,6 +372,10 @@ export interface Database {
       complete_signup: {
         Args: { p_user_id: string };
         Returns: string | null;
+      };
+      owner_list_clients: {
+        Args: Record<string, never>;
+        Returns: OwnerClientListRow[];
       };
     };
     Enums: {

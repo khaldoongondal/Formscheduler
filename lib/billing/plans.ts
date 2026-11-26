@@ -134,3 +134,11 @@ export function planLimitMessageFromError(message: string, state?: PlanState): s
       return PLAN_CHECK_FAILED_MESSAGE;
   }
 }
+
+/**
+ * The "Powered by FormBook" badge shows only on free (Bootstrapping) tenants,
+ * unless the platform owner switched it off. Scaling and suspended never show it.
+ */
+export function shouldShowBadge(plan: PlanState, badgeEnabled: boolean | null | undefined): boolean {
+  return plan === "free" && badgeEnabled !== false;
+}

@@ -961,7 +961,7 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
           </>
         )}
       </section>
-      <FormFooter slug={funnel.slug} mode={mode} />
+      <FormFooter slug={funnel.slug} mode={mode} showBadge={funnel.show_badge} />
     </main>
   );
 }

@@ -1,33 +1,38 @@
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { CalendarCheck, ChartNoAxesCombined, Route } from "lucide-react";
+import { CONTACT_EMAIL } from "@/lib/billing/plans";
 import { Button } from "@/components/ui/button";
 
 const features: Array<{ title: string; body: string; Icon: LucideIcon }> = [
-  { title: "Capture", body: "Lead sessions start before slot reveal.", Icon: CalendarCheck },
-  { title: "Qualify", body: "Questions and options render from Supabase.", Icon: Route },
-  { title: "Measure", body: "Funnel analytics are event-based from day one.", Icon: ChartNoAxesCombined }
+  { title: "Capture", body: "Every lead is saved as soon as they enter their contact details.", Icon: CalendarCheck },
+  {
+    title: "Qualify",
+    body: "Ask your questions and stop people who are not a fit before they see your calendar.",
+    Icon: Route
+  },
+  { title: "Measure", body: "See views, starts, leads and bookings for each form.", Icon: ChartNoAxesCombined }
 ];
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-white">
-      <section className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-6 py-16">
+    <main className="flex min-h-screen flex-col bg-white">
+      <section className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-6 py-16">
         <div className="max-w-3xl">
-          <p className="text-sm font-semibold uppercase tracking-wide text-primary">FormBook</p>
-          <h1 className="mt-4 text-5xl font-semibold tracking-tight text-slate-950 md:text-6xl">
-            Qualify leads before calendar slots appear.
+          <p className="text-sm font-semibold uppercase tracking-wide text-primary">FormBook, a tool from Gondal Tech</p>
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl md:text-6xl">
+            Qualify leads before they book a call.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            A database-driven booking layer that captures contact data, qualifies prospects,
-            routes intent, and books appointments into GoHighLevel as the system of record.
+            Build a short form that asks your questions, saves every lead, and shows your calendar only to the people
+            you want to talk to. Bookings go straight into GoHighLevel.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button asChild>
-              <Link href="/admin/funnels">Open Admin</Link>
+              <Link href="/signup">Create a free account</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="/book/demo-consultation">Preview Demo Funnel</Link>
+              <Link href="/login">Sign in</Link>
             </Button>
           </div>
         </div>
@@ -41,6 +46,25 @@ export default function HomePage() {
           ))}
         </div>
       </section>
+      <footer className="border-t">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-6 py-6 text-sm text-slate-500">
+          <Link className="hover:text-slate-900 hover:underline" href="/terms">
+            Terms
+          </Link>
+          <Link className="hover:text-slate-900 hover:underline" href="/privacy">
+            Privacy
+          </Link>
+          <Link className="hover:text-slate-900 hover:underline" href="/dpa">
+            Data Processing Addendum
+          </Link>
+          <span className="break-all">
+            Contact:{" "}
+            <a className="hover:text-slate-900 hover:underline" href={`mailto:${CONTACT_EMAIL}`}>
+              {CONTACT_EMAIL}
+            </a>
+          </span>
+        </div>
+      </footer>
     </main>
   );
 }

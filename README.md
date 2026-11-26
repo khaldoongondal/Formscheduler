@@ -1,6 +1,6 @@
-# Leadder Scheduler MVP
+# FormBook
 
-Leadder Scheduler is a conversion-first booking layer that captures and qualifies leads before showing GoHighLevel calendar availability.
+FormBook, a tool from Gondal Tech, lets businesses build short qualifying forms that save every lead and show GoHighLevel calendar availability only to the people they want to talk to. Production address: `https://formbooking.gondaltech.app` (from `NEXT_PUBLIC_APP_URL`). Release steps are in `docs/production-deployment.md`.
 
 GHL remains the system of record for contacts, opportunities, pipelines, appointments, workflows, reminders, and CRM records. Leadder owns funnel rendering, question flow, lead capture, qualification, routing readiness, booking UX, analytics, and the GHL handoff.
 

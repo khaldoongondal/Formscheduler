@@ -1,7 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
-import { assertFormLimit, isTenantSuspended, planLimitMessageForTenant } from "@/lib/billing/plan-service";
-import { planLimitMessageFromError } from "@/lib/billing/plans";
+import { assertFormLimit, planLimitMessageForTenant } from "@/lib/billing/plan-service";
+import { parsePlanState, planLimitMessageFromError, shouldShowBadge } from "@/lib/billing/plans";
 import { buildCopySlug, checkSlug } from "@/lib/funnels/slugs";
 import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
 import { EXTENSION_BY_MIME, sniffImageMime, type SniffedImage } from "@/lib/security/image-sniff";
@@ -60,9 +60,30 @@ export type BookingFunnel = Pick<
   | "qualification_rule"
 > & {
   questions: BookingQuestion[];
+  /** "Powered by FormBook" badge: free tenants unless the owner switched it off. */
+  show_badge: boolean;
 };
 
-type BookingFunnelBase = Omit<BookingFunnel, "questions">;
+type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge">;
+
+/**
+ * One tenant read for public pages: whether the tenant is suspended and whether
+ * its forms show the badge. Falls back to the plan alone when migration 0023
+ * (badge_enabled) is not applied yet.
+ */
+async function getPublicTenantFlags(tenantId: string): Promise<{ suspended: boolean; showBadge: boolean }> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.from("tenants").select("plan, badge_enabled").eq("id", tenantId).single();
+  if (error?.code === "42703") {
+    const fallback = await supabase.from("tenants").select("plan").eq("id", tenantId).single();
+    if (fallback.error) throw new Error(fallback.error.message);
+    const plan = parsePlanState(fallback.data.plan);
+    return { suspended: plan === "suspended", showBadge: shouldShowBadge(plan, true) };
+  }
+  if (error) throw new Error(error.message);
+  const plan = parsePlanState(data.plan);
+  return { suspended: plan === "suspended", showBadge: shouldShowBadge(plan, data.badge_enabled) };
+}
 
 export const FOREIGN_CONNECTION_MESSAGE = "Choose a GoHighLevel connection from your own account.";
 export const TAKEN_DOWN_COPY_MESSAGE = "This form was taken down and cannot be copied.";
@@ -197,7 +218,8 @@ export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | nul
   if (!funnelBase) return null;
 
   // Suspended tenants (lapsed subscriptions) stop serving public booking pages.
-  if (await isTenantSuspended(funnelBase.tenant_id)) return null;
+  const tenantFlags = await getPublicTenantFlags(funnelBase.tenant_id);
+  if (tenantFlags.suspended) return null;
 
   const { data: questions, error: questionsError } = await supabase
     .from("questions")
@@ -236,6 +258,7 @@ export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | nul
 
   return {
     ...funnelBase,
+    show_badge: tenantFlags.showBadge,
     questions: questions.map((question) => ({
       ...question,
       options: options.filter((option) => option.question_id === question.id)
