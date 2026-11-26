@@ -10,6 +10,7 @@ import {
 } from "@/lib/funnels/contact-fields";
 import { answerMatchesQuestionDisqualificationRule } from "@/lib/funnels/disqualification";
 import { isValidWebsiteValue, websiteValidationMessage } from "@/lib/validation/website";
+import { FormFooter } from "@/components/booking/form-footer";
 import { PhoneInput } from "@/components/booking/phone-input";
 
 type FlowStep = "intake" | "slots" | "booked" | "disqualified";
@@ -960,6 +961,7 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
           </>
         )}
       </section>
+      <FormFooter slug={funnel.slug} mode={mode} />
     </main>
   );
 }

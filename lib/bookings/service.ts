@@ -1,4 +1,6 @@
 import { trackEvent } from "@/lib/analytics/service";
+import { PublicError } from "@/lib/api/responses";
+import { assertFunnelServesPublic } from "@/lib/funnels/public-gate";
 import { createDemoGhlId, createDemoSlots, getDemoCalendarId, isDemoSlotModeEnabled } from "@/lib/demo/slots";
 import { getFunnelGhlConfig } from "@/lib/ghl/funnel-config";
 import {
@@ -17,17 +19,13 @@ export async function getAvailableSlots(input: unknown) {
   const session = await getLeadSession(parsed.lead_session_id);
 
   if (session.status === "disqualified") {
-    throw new Error("This lead is not eligible to view calendar availability.");
+    throw new PublicError("This lead is not eligible to view calendar availability.");
   }
 
-  if (isDemoSlotModeEnabled()) {
-    const { data: funnel, error: funnelError } = await supabase
-      .from("funnels")
-      .select("*")
-      .eq("id", session.funnel_id)
-      .single();
+  const publicFunnel = await assertFunnelServesPublic(session.funnel_id);
 
-    if (funnelError) throw new Error(funnelError.message);
+  if (isDemoSlotModeEnabled()) {
+    const funnel = publicFunnel;
 
     const ghlContactId = session.ghl_contact_id ?? createDemoGhlId("contact", session.id);
     const ghlOpportunityId = session.ghl_opportunity_id ?? createDemoGhlId("opportunity", session.id);
@@ -130,17 +128,13 @@ export async function bookAppointment(input: unknown) {
   const session = await getLeadSession(parsed.lead_session_id);
 
   if (session.status === "disqualified") {
-    throw new Error("This lead is not eligible to book an appointment.");
+    throw new PublicError("This lead is not eligible to book an appointment.");
   }
 
-  if (isDemoSlotModeEnabled()) {
-    const { data: funnel, error: funnelError } = await supabase
-      .from("funnels")
-      .select("*")
-      .eq("id", session.funnel_id)
-      .single();
+  const publicFunnel = await assertFunnelServesPublic(session.funnel_id);
 
-    if (funnelError) throw new Error(funnelError.message);
+  if (isDemoSlotModeEnabled()) {
+    const funnel = publicFunnel;
 
     const ghlContactId = session.ghl_contact_id ?? createDemoGhlId("contact", session.id);
     const ghlOpportunityId = session.ghl_opportunity_id ?? createDemoGhlId("opportunity", session.id);

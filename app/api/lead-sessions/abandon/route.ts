@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { fail, ok } from "@/lib/api/responses";
+import { failPublic, ok } from "@/lib/api/responses";
 import { abandonLeadSession } from "@/lib/lead-sessions/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
@@ -9,7 +9,7 @@ const abandonSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const limited = enforceRateLimit(request, "lead-abandon", 20);
+  const limited = await enforceRateLimit(request, "lead-abandon");
   if (limited) return limited;
 
   try {
@@ -17,6 +17,6 @@ export async function POST(request: NextRequest) {
     const session = await abandonLeadSession(parsed.lead_session_id);
     return ok({ session });
   } catch (error) {
-    return fail(error);
+    return failPublic(error);
   }
 }

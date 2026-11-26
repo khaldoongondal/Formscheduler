@@ -1,10 +1,10 @@
 import { after, NextRequest } from "next/server";
-import { fail, ok } from "@/lib/api/responses";
+import { failPublic, ok } from "@/lib/api/responses";
 import { submitLeadAnswers, syncLeadAnswersToGhl } from "@/lib/lead-sessions/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export async function POST(request: NextRequest) {
-  const limited = enforceRateLimit(request, "lead-answers", 60);
+  const limited = await enforceRateLimit(request, "lead-answers");
   if (limited) return limited;
 
   try {
@@ -15,6 +15,6 @@ export async function POST(request: NextRequest) {
     });
     return ok(result);
   } catch (error) {
-    return fail(error);
+    return failPublic(error);
   }
 }

@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
-import { fail, ok } from "@/lib/api/responses";
+import { failPublic, ok } from "@/lib/api/responses";
 import { bookAppointment } from "@/lib/bookings/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export async function POST(request: NextRequest) {
-  const limited = enforceRateLimit(request, "bookings", 5);
+  const limited = await enforceRateLimit(request, "bookings");
   if (limited) return limited;
 
   try {
@@ -12,6 +12,6 @@ export async function POST(request: NextRequest) {
     const attempt = await bookAppointment(body);
     return ok({ attempt }, 201);
   } catch (error) {
-    return fail(error);
+    return failPublic(error);
   }
 }

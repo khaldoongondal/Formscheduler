@@ -1,38 +1,47 @@
-import { NextRequest } from "next/server";
-import { z } from "zod";
-import { fail, ok } from "@/lib/api/responses";
+import { NextRequest, NextResponse } from "next/server";
+import { failPublic, ok } from "@/lib/api/responses";
 import { getRequestGeoMetadata } from "@/lib/analytics/country-filter";
 import { trackEvent } from "@/lib/analytics/service";
-import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { createServiceClient } from "@/lib/supabase/server";
+import { assertFunnelServesPublic } from "@/lib/funnels/public-gate";
+import { ANALYTICS_MAX_BODY_BYTES } from "@/lib/security/limits";
+import { enforceDailyCap, enforceRateLimit } from "@/lib/security/rate-limit";
 import type { Json } from "@/lib/types/database";
+import { analyticsEventSchema } from "@/lib/validation/analytics";
 
-const eventSchema = z.object({
-  funnel_id: z.string().uuid(),
-  lead_session_id: z.string().uuid().optional(),
-  visitor_id: z.string().min(8).max(128).optional(),
-  event_type: z.enum(["page_view", "step_view"]),
-  source: z.string().optional(),
-  source_url: z.string().url().optional(),
-  user_agent: z.string().optional(),
-  metadata: z.record(z.unknown()).optional()
-});
+function tooLarge() {
+  return NextResponse.json({ error: "Request too large." }, { status: 413 });
+}
 
 export async function POST(request: NextRequest) {
-  const limited = enforceRateLimit(request, "analytics", 120);
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declaredLength) && declaredLength > ANALYTICS_MAX_BODY_BYTES) {
+    return tooLarge();
+  }
+
+  const limited = await enforceRateLimit(request, "analytics");
   if (limited) return limited;
 
   try {
-    const parsed = eventSchema.parse(await request.json());
-    const supabase = createServiceClient();
-    const { data: funnel, error } = await supabase
-      .from("funnels")
-      .select("id,tenant_id")
-      .eq("id", parsed.funnel_id)
-      .eq("is_published", true)
-      .single();
+    // Content-Length can be missing (chunked), so check the real size too.
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).length > ANALYTICS_MAX_BODY_BYTES) {
+      return tooLarge();
+    }
 
-    if (error) throw new Error("Funnel not found.");
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return NextResponse.json({ error: "Please check your answers and try again." }, { status: 422 });
+    }
+
+    const parsed = analyticsEventSchema.parse(body);
+    const funnel = await assertFunnelServesPublic(parsed.funnel_id);
+
+    // Daily caps per form and tenant. The client ignores the response.
+    if (!(await enforceDailyCap("analytics", { funnelId: funnel.id, tenantId: funnel.tenant_id }))) {
+      return ok({ tracked: false }, 202);
+    }
 
     await trackEvent({
       tenantId: funnel.tenant_id,
@@ -50,6 +59,6 @@ export async function POST(request: NextRequest) {
     });
     return ok({ tracked: true }, 201);
   } catch (error) {
-    return fail(error);
+    return failPublic(error);
   }
 }

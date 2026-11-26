@@ -1,3 +1,6 @@
+import { PublicError } from "@/lib/api/responses";
+import { assertFunnelServesPublic } from "@/lib/funnels/public-gate";
+import { enforceDailyCap } from "@/lib/security/rate-limit";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getRequestGeoMetadata } from "@/lib/analytics/country-filter";
 import { trackEvent } from "@/lib/analytics/service";
@@ -234,14 +237,10 @@ async function moveDisqualifiedLeadToGhl(
 export async function startLeadSession(input: unknown, request?: Request) {
   const parsed = startLeadSessionSchema.parse(input);
   const supabase = createServiceClient();
-  const { data: funnel, error: funnelError } = await supabase
-    .from("funnels")
-    .select("*")
-    .eq("id", parsed.funnel_id)
-    .eq("is_published", true)
-    .single();
-
-  if (funnelError) throw new Error(funnelError.message);
+  const funnel = await assertFunnelServesPublic(parsed.funnel_id);
+  if (!(await enforceDailyCap("lead", { funnelId: funnel.id, tenantId: funnel.tenant_id }))) {
+    throw new PublicError("This form is not taking new submissions right now. Please try again later.", 429);
+  }
 
   const normalizedFullName = parsed.full_name?.trim() ?? "";
   const fallbackNameParts = splitName(normalizedFullName);
@@ -431,6 +430,7 @@ export async function submitLeadAnswers(input: unknown) {
   const parsed = submitAnswersSchema.parse(input);
   const supabase = createServiceClient();
   const session = await getLeadSession(parsed.lead_session_id);
+  await assertFunnelServesPublic(session.funnel_id);
 
   const { data: questions, error: questionError } = await supabase
     .from("questions")
@@ -444,12 +444,12 @@ export async function submitLeadAnswers(input: unknown) {
   const answerRows = parsed.answers.map((answer) => {
     const question = questionsById.get(answer.question_id);
     if (!question) {
-      throw new Error("Answer references a question outside this funnel.");
+      throw new PublicError("Answer references a question outside this funnel.");
     }
 
     const rawTextValue = Array.isArray(answer.value) ? answer.value.join(", ") : String(answer.value);
     if (question.question_type === "url" && rawTextValue.trim() && !isValidWebsiteValue(rawTextValue)) {
-      throw new Error(websiteValidationMessage);
+      throw new PublicError(websiteValidationMessage);
     }
 
     const normalized = normalizeAnswer(question, answer.value);

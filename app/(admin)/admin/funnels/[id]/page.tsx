@@ -187,6 +187,7 @@ export default async function FunnelDetailPage({
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{funnel.name}</h1>
             <StatusBadge published={funnel.is_published} />
+            {funnel.taken_down_at ? <TakenDownBadge /> : null}
           </div>
           <p className="mt-2 text-sm text-slate-600">/{funnel.slug}</p>
           {funnel.description ? (
@@ -1591,4 +1592,8 @@ function StatusBadge({ published }: { published: boolean }) {
 
 function formatRate(value: number) {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function TakenDownBadge() {
+  return <span className="rounded-md bg-red-50 px-2 py-1 text-xs font-semibold text-red-700">Taken down</span>;
 }

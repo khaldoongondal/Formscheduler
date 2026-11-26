@@ -1,4 +1,5 @@
 import type { PlanState } from "@/lib/billing/plans";
+import { randomSuffix } from "@/lib/security/random";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Tenant } from "@/lib/types/database";
 
@@ -26,9 +27,6 @@ function slugify(value: string) {
     .slice(0, 48);
 }
 
-function randomSuffix() {
-  return Math.random().toString(36).slice(2, 2 + SLUG_SUFFIX_LENGTH);
-}
 
 function getAppUrl() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -152,7 +150,7 @@ export async function provisionTenant(input: {
     .from("tenants")
     .insert({
       name: tenantName,
-      slug: `${baseSlug}-${randomSuffix()}`,
+      slug: `${baseSlug}-${randomSuffix(SLUG_SUFFIX_LENGTH)}`,
       plan
     })
     .select("id")

@@ -35,6 +35,20 @@ export async function getGhlConnection(id: string) {
   return data;
 }
 
+/** The connection only when it belongs to `tenantId`; null otherwise. */
+export async function getGhlConnectionForTenant(id: string, tenantId: string): Promise<GhlConnection | null> {
+  noStore();
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ghl_connections")
+    .select("*")
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
 export async function createGhlConnection(input: unknown) {
   const parsed = ghlConnectionSchema.parse(input);
   const token = normalizeToken(parsed.private_token);

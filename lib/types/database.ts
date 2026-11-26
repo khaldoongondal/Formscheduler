@@ -103,6 +103,9 @@ export interface Funnel {
   routing_rules: Json;
   scoring_rules: Json;
   disqualification_rules: Json;
+  /** Set by the platform owner (takedown). A taken-down form cannot be active. */
+  taken_down_at: string | null;
+  taken_down_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -247,6 +250,30 @@ export interface PlanLimitsRow {
   updated_at: string;
 }
 
+export interface RateLimitCounter {
+  bucket_key: string;
+  hits: number;
+  expires_at: string;
+}
+
+export type FormReportReason = "phishing" | "spam" | "impersonation" | "illegal" | "other";
+export type FormReportStatus = "open" | "actioned" | "dismissed";
+
+export interface FormReport {
+  id: string;
+  funnel_id: string | null;
+  tenant_id: string | null;
+  funnel_slug: string;
+  reason: FormReportReason;
+  details: string | null;
+  reporter_email: string | null;
+  reporter_ip_hash: string | null;
+  status: FormReportStatus;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -262,9 +289,16 @@ export interface Database {
       booking_attempts: Table<BookingAttempt>;
       analytics_events: Table<AnalyticsEvent>;
       plan_limits: Table<PlanLimitsRow>;
+      rate_limit_counters: Table<RateLimitCounter>;
+      form_reports: Table<FormReport>;
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      rate_limit_hit: {
+        Args: { p_bucket_key: string; p_window_seconds: number };
+        Returns: number;
+      };
+    };
     Enums: {
       lead_session_status: LeadSessionStatus;
       question_type: QuestionType;

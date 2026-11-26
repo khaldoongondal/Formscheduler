@@ -2,6 +2,10 @@ import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
 import { assertFormLimit, isTenantSuspended, planLimitMessageForTenant } from "@/lib/billing/plan-service";
 import { planLimitMessageFromError } from "@/lib/billing/plans";
+import { buildCopySlug, checkSlug } from "@/lib/funnels/slugs";
+import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
+import { EXTENSION_BY_MIME, sniffImageMime, type SniffedImage } from "@/lib/security/image-sniff";
+import { randomSuffix } from "@/lib/security/random";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel, Question, QuestionOption } from "@/lib/types/database";
 import { mergeContactFieldSettings, resolveContactFieldConfig } from "@/lib/funnels/contact-fields";
@@ -59,6 +63,26 @@ export type BookingFunnel = Pick<
 };
 
 type BookingFunnelBase = Omit<BookingFunnel, "questions">;
+
+export const FOREIGN_CONNECTION_MESSAGE = "Choose a GoHighLevel connection from your own account.";
+export const TAKEN_DOWN_COPY_MESSAGE = "This form was taken down and cannot be copied.";
+
+/** Maps the connection trigger error (migration 0021) to the user message. */
+function connectionMessageFromError(message: string): string | null {
+  return message.includes("FORMBOOK_INVALID:ghl_connection") ? FOREIGN_CONNECTION_MESSAGE : null;
+}
+
+async function assertConnectionBelongsToTenant(connectionId: string | null | undefined, tenantId: string) {
+  if (!connectionId) return;
+  const connection = await getGhlConnectionForTenant(connectionId, tenantId);
+  if (!connection) throw new Error(FOREIGN_CONNECTION_MESSAGE);
+}
+
+function assertSlugAllowed(slug: string) {
+  const result = checkSlug(slug);
+  if (!result.ok) throw new Error(result.message);
+  return result.slug;
+}
 
 type FunnelSlugRow = Pick<
   Funnel,
@@ -134,6 +158,7 @@ export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | nul
     .select(funnelSelect)
     .eq("slug", slug)
     .eq("is_published", true)
+    .is("taken_down_at", null)
     .single();
   let funnelBase = funnel ? normalizeBookingFunnelBase(funnel as FunnelSlugRow) : null;
   let funnelError = initialFunnelError;
@@ -275,6 +300,8 @@ function getMissingInsertColumn(message: string, payload: Record<string, unknown
 
 export async function createFunnel(input: unknown) {
   const parsed = createFunnelSchema.parse(input);
+  parsed.slug = assertSlugAllowed(parsed.slug);
+  await assertConnectionBelongsToTenant(parsed.ghl_connection_id, parsed.tenant_id);
   // New forms are always drafts (the create schema has no is_published).
   await assertFormLimit(parsed.tenant_id, "create_draft");
   const supabase = createServiceClient();
@@ -322,7 +349,8 @@ export async function createFunnel(input: unknown) {
     const { data, error } = await supabase.from("funnels").insert(insertPayload).select("*").single();
     if (!error) return data;
 
-    const friendly = await planLimitMessageForTenant(error.message, parsed.tenant_id);
+    const friendly =
+      (await planLimitMessageForTenant(error.message, parsed.tenant_id)) ?? connectionMessageFromError(error.message);
     if (friendly) throw new Error(friendly);
 
     const missingColumn = getMissingInsertColumn(error.message, insertPayload);
@@ -349,15 +377,25 @@ export async function updateFunnel(input: unknown) {
     ...funnel
   } = parsed;
   let existingTenantId: string | null = null;
-  if (funnel.is_published === true) {
+  const changesConnection = Boolean(funnel.ghl_connection_id);
+  if (funnel.is_published === true || funnel.slug !== undefined || changesConnection) {
     const { data: existing, error: existingError } = await supabase
       .from("funnels")
-      .select("tenant_id,is_published")
+      .select("tenant_id,is_published,slug")
       .eq("id", id)
       .single();
     if (existingError) throw new Error(existingError.message);
     existingTenantId = existing.tenant_id;
-    if (!existing.is_published) {
+
+    // Slug rules run only when the slug changes, so existing forms keep saving.
+    if (funnel.slug !== undefined) {
+      funnel.slug =
+        funnel.slug.trim().toLowerCase() === existing.slug ? existing.slug : assertSlugAllowed(funnel.slug);
+    }
+    if (changesConnection) {
+      await assertConnectionBelongsToTenant(funnel.ghl_connection_id, existing.tenant_id);
+    }
+    if (funnel.is_published === true && !existing.is_published) {
       await assertFormLimit(existing.tenant_id, "activate", id);
     }
   }
@@ -452,6 +490,8 @@ export async function updateFunnel(input: unknown) {
     .single();
 
   if (error) {
+    const connectionMessage = connectionMessageFromError(error.message);
+    if (connectionMessage) throw new Error(connectionMessage);
     if (planLimitMessageFromError(error.message)) {
       const tenantId = existingTenantId ?? (await getFunnelTenantId(id));
       const friendly = tenantId
@@ -474,28 +514,44 @@ export async function duplicateFunnel(id: string) {
   const source = await getFunnelById(id);
   if (!source) throw new Error("Funnel not found.");
 
+  if (source.taken_down_at) throw new Error(TAKEN_DOWN_COPY_MESSAGE);
+
   await assertFormLimit(source.tenant_id, "create_draft");
 
   const supabase = createServiceClient();
-  const duplicatedSlug = `${source.slug}-copy-${Date.now().toString(36)}`;
-  const { questions, ...sourceFunnel } = source;
+  const suffix = randomSuffix();
+  const generatedSlug = buildCopySlug(source.slug, suffix);
+  const duplicatedSlug = checkSlug(generatedSlug).ok ? generatedSlug : `form-copy-${suffix}`;
+
+  // Explicit payload (decision D6): never copy the id, timestamps, the active
+  // state or the takedown columns.
+  const {
+    questions,
+    id: _sourceId,
+    created_at: _createdAt,
+    updated_at: _updatedAt,
+    is_published: _isPublished,
+    taken_down_at: _takenDownAt,
+    taken_down_reason: _takenDownReason,
+    ...sourceFunnel
+  } = source;
+  void [_sourceId, _createdAt, _updatedAt, _isPublished, _takenDownAt, _takenDownReason];
 
   const { data: funnel, error: funnelError } = await supabase
     .from("funnels")
     .insert({
       ...sourceFunnel,
-      id: undefined,
       name: `${source.name} Copy`,
       slug: duplicatedSlug,
-      is_published: false,
-      created_at: undefined,
-      updated_at: undefined
+      is_published: false
     })
     .select("*")
     .single();
 
   if (funnelError) {
-    const friendly = await planLimitMessageForTenant(funnelError.message, source.tenant_id);
+    const friendly =
+      (await planLimitMessageForTenant(funnelError.message, source.tenant_id)) ??
+      connectionMessageFromError(funnelError.message);
     throw new Error(friendly ?? funnelError.message);
   }
 
@@ -603,22 +659,28 @@ export async function deleteQuestionOption(id: string) {
   if (error) throw new Error(error.message);
 }
 
+export const LOGO_TYPE_MESSAGE = "Logo must be a PNG, JPG or WebP file.";
+export const LOGO_SIZE_MESSAGE = "Logo must be 2MB or smaller.";
+
 export async function uploadFunnelLogo(input: { funnelId: string; tenantId: string; file: File }) {
   const supabase = createServiceClient();
-  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
   const maxLogoBytes = 2 * 1024 * 1024;
-  if (!allowedTypes.has(input.file.type)) {
-    throw new Error("Logo must be a PNG, JPG, WebP, or SVG file.");
-  }
   if (input.file.size > maxLogoBytes) {
-    throw new Error("Logo must be 2MB or smaller.");
+    throw new Error(LOGO_SIZE_MESSAGE);
   }
 
-  const extension = input.file.name.split(".").pop()?.toLowerCase() ?? "png";
-  const path = `${input.tenantId}/${input.funnelId}/logo.${extension}`;
+  // SVG is not accepted (it can carry scripts). The stored type and extension
+  // come from the checked bytes, never from the file name.
+  const header = new Uint8Array(await input.file.slice(0, 16).arrayBuffer());
+  const sniffed = sniffImageMime(header);
+  if (!sniffed || sniffed !== (input.file.type as SniffedImage)) {
+    throw new Error(LOGO_TYPE_MESSAGE);
+  }
+
+  const path = `${input.tenantId}/${input.funnelId}/logo.${EXTENSION_BY_MIME[sniffed]}`;
   const { error: uploadError } = await supabase.storage.from("funnel-assets").upload(path, input.file, {
     cacheControl: "3600",
-    contentType: input.file.type,
+    contentType: sniffed,
     upsert: true
   });
 

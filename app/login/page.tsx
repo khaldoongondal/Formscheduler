@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { safeNextPath } from "@/lib/security/safe-redirect";
 
 export default async function LoginPage({
   searchParams
@@ -24,7 +25,7 @@ export default async function LoginPage({
         </CardHeader>
         <CardContent>
           <form action={signIn} className="space-y-4">
-            <input type="hidden" name="next" value={params.next ?? "/admin/funnels"} />
+            <input type="hidden" name="next" value={safeNextPath(params.next)} />
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" required autoComplete="email" />

@@ -1,4 +1,4 @@
-import { getGhlConnection, resolveGhlRuntimeConfig } from "@/lib/ghl/connections";
+import { getGhlConnectionForTenant, resolveGhlRuntimeConfig } from "@/lib/ghl/connections";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export async function getFunnelGhlConfig(funnelId: string) {
@@ -11,10 +11,14 @@ export async function getFunnelGhlConfig(funnelId: string) {
 
   if (funnelError) throw new Error(funnelError.message);
   if (!funnel.ghl_connection_id) {
-    throw new Error("This funnel is not connected to a GHL account.");
+    throw new Error("This form is not connected to GoHighLevel.");
   }
 
-  const connection = await getGhlConnection(funnel.ghl_connection_id);
+  // Scoped by tenant: a form can only use a connection from its own account.
+  const connection = await getGhlConnectionForTenant(funnel.ghl_connection_id, funnel.tenant_id);
+  if (!connection) {
+    throw new Error("This form is not connected to GoHighLevel.");
+  }
   if (!connection.is_active) {
     throw new Error(`GHL connection "${connection.name}" is inactive.`);
   }

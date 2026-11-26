@@ -4,7 +4,7 @@ import { useId, useRef, useState, type DragEvent } from "react";
 import { ImagePlus, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const allowedLogoTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
+const allowedLogoTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const maxLogoBytes = 2 * 1024 * 1024;
 
 function formatFileSize(bytes: number) {
@@ -25,7 +25,7 @@ export function LogoDropInput() {
 
     if (!allowedLogoTypes.has(file.type)) {
       setFileName(null);
-      setError("Use a PNG, JPG, WebP, or SVG logo.");
+      setError("Logo must be a PNG, JPG or WebP file.");
       return;
     }
 
@@ -77,7 +77,7 @@ export function LogoDropInput() {
           {fileName ? fileName : "Drop logo here"}
         </span>
         <span className="mt-1 text-sm leading-5 text-slate-500">
-          PNG, JPG, WebP, or SVG. Max 2MB. Click to browse.
+          PNG, JPG or WebP. Max 2MB. Click to browse.
         </span>
       </label>
       <input
@@ -85,7 +85,7 @@ export function LogoDropInput() {
         id={inputId}
         name="logo"
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        accept="image/png,image/jpeg,image/webp"
         className="sr-only"
         onChange={(event) => chooseFile(event.currentTarget.files?.item(0) ?? null)}
       />

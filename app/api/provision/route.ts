@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { fail, ok } from "@/lib/api/responses";
+import { fail, failPublic, ok } from "@/lib/api/responses";
 import { parsePlanState } from "@/lib/billing/plans";
 import { provisionTenant } from "@/lib/provisioning/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -27,7 +27,7 @@ function isAuthorized(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const limited = enforceRateLimit(request, "provision", 10);
+  const limited = await enforceRateLimit(request, "provision");
   if (limited) return limited;
 
   if (!isAuthorized(request)) {
@@ -39,6 +39,6 @@ export async function POST(request: NextRequest) {
     const result = await provisionTenant(parsed);
     return ok(result, result.tenant_created ? 201 : 200);
   } catch (error) {
-    return fail(error);
+    return failPublic(error);
   }
 }

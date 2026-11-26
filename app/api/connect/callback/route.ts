@@ -40,6 +40,8 @@ export async function GET(request: NextRequest) {
     adminUrl.searchParams.set("connection", connection.id);
     return NextResponse.redirect(adminUrl);
   } catch (error) {
-    return failed(error instanceof Error ? error.message : "GHL sign-in failed. Please try again.");
+    // Never echo GoHighLevel or Supabase error text into the URL.
+    console.error("[connect-callback] GoHighLevel sign-in failed", error);
+    return failed("GoHighLevel sign-in failed. Please try again.");
   }
 }
