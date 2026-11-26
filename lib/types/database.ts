@@ -36,6 +36,12 @@ export interface Tenant {
   name: string;
   slug: string;
   plan: "free" | "scaling" | "suspended";
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  business_name: string | null;
+  website: string | null;
+  signup_source: "legacy" | "provisioned" | "self_serve";
   created_at: string;
   updated_at: string;
 }
@@ -274,6 +280,20 @@ export interface FormReport {
   resolved_by: string | null;
 }
 
+export interface SignupRequest {
+  user_id: string;
+  email: string;
+  full_name: string;
+  phone: string;
+  business_name: string;
+  website: string;
+  plan: "free" | "scaling";
+  tenant_id: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -291,12 +311,25 @@ export interface Database {
       plan_limits: Table<PlanLimitsRow>;
       rate_limit_counters: Table<RateLimitCounter>;
       form_reports: Table<FormReport>;
+      signup_requests: Table<SignupRequest>;
     };
     Views: Record<string, never>;
     Functions: {
       rate_limit_hit: {
         Args: { p_bucket_key: string; p_window_seconds: number };
         Returns: number;
+      };
+      get_auth_user_id_by_email: {
+        Args: { p_email: string };
+        Returns: string | null;
+      };
+      is_auth_user_confirmed: {
+        Args: { p_user_id: string };
+        Returns: boolean;
+      };
+      complete_signup: {
+        Args: { p_user_id: string };
+        Returns: string | null;
       };
     };
     Enums: {

@@ -1,3 +1,4 @@
+import { findUserIdByEmail } from "@/lib/auth/users";
 import type { PlanState } from "@/lib/billing/plans";
 import { randomSuffix } from "@/lib/security/random";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -54,22 +55,6 @@ async function generateLoginLink(email: string) {
   if (!hashedToken) throw new Error("Login link generation returned no token.");
 
   return `${getAppUrl()}/auth/confirm?token_hash=${hashedToken}&type=recovery&next=/auth/set-password`;
-}
-
-async function findUserIdByEmail(email: string) {
-  const supabase = createServiceClient();
-  const perPage = 200;
-
-  for (let page = 1; page <= 25; page += 1) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error) throw new Error(error.message);
-
-    const match = data.users.find((user) => user.email?.toLowerCase() === email);
-    if (match) return match.id;
-    if (data.users.length < perPage) break;
-  }
-
-  return null;
 }
 
 /**
@@ -151,7 +136,8 @@ export async function provisionTenant(input: {
     .insert({
       name: tenantName,
       slug: `${baseSlug}-${randomSuffix(SLUG_SUFFIX_LENGTH)}`,
-      plan
+      plan,
+      signup_source: "provisioned"
     })
     .select("id")
     .single<Pick<Tenant, "id">>();

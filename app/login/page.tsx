@@ -46,6 +46,12 @@ export default async function LoginPage({
             <Button className="w-full" type="submit">
               Sign in
             </Button>
+            <p className="text-center text-sm text-slate-500">
+              New to FormBook?{" "}
+              <Link className="font-semibold text-slate-900 underline underline-offset-2" href="/signup">
+                Create a free account
+              </Link>
+            </p>
           </form>
         </CardContent>
       </Card>

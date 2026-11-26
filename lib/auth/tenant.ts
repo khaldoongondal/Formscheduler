@@ -1,6 +1,8 @@
 import { createAuthServerClient } from "@/lib/supabase/auth";
+import { completeSignupForUser } from "@/lib/signup/service";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { TenantMember } from "@/lib/types/database";
+import { UNVERIFIED_EMAIL_MESSAGE } from "@/lib/validation/signup";
 
 export type TenantRole = TenantMember["role"];
 
@@ -25,6 +27,10 @@ export async function getAdminTenantContext(allowedRoles: TenantRole[] = allRole
   const supabase = createServiceClient();
 
   if (user) {
+    if (!user.email_confirmed_at) {
+      throw new Error(UNVERIFIED_EMAIL_MESSAGE);
+    }
+
     const { data: member, error } = await supabase
       .from("tenant_members")
       .select("tenant_id, role")
@@ -37,6 +43,23 @@ export async function getAdminTenantContext(allowedRoles: TenantRole[] = allRole
       return { tenantId: member.tenant_id, role: member.role };
     }
     if (member?.tenant_id) {
+      throw new Error("You do not have permission to perform this action.");
+    }
+
+    // Self-serve signup whose tenant was not created at verification time
+    // (for example a failed RPC in /auth/confirm): create it now, once.
+    const completedTenantId = await completeSignupForUser(user.id).catch((completeError: unknown) => {
+      console.error(
+        "[auth] complete signup failed:",
+        completeError instanceof Error ? completeError.message : "unknown error"
+      );
+      return null;
+    });
+    if (completedTenantId) {
+      const role: TenantRole = "owner";
+      if (hasAllowedRole(role, allowedRoles)) {
+        return { tenantId: completedTenantId, role };
+      }
       throw new Error("You do not have permission to perform this action.");
     }
     throw new Error("Authenticated user is not assigned to a tenant.");

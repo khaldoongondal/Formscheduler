@@ -1,8 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
+import { completeSignupForUser } from "@/lib/signup/service";
 import { createAuthServerClient } from "@/lib/supabase/auth";
 
-const allowedNextPaths = new Set(["/auth/set-password", "/admin/funnels"]);
+const allowedNextPaths = new Set(["/auth/set-password", "/admin/funnels", "/admin/welcome"]);
+
+/**
+ * Creates the tenant for a self-serve signup right after verification.
+ * Never blocks the redirect: the welcome page (getAdminTenantContext) retries.
+ */
+async function completeSignupIfPending(supabase: Awaited<ReturnType<typeof createAuthServerClient>>) {
+  try {
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (user?.email_confirmed_at) {
+      await completeSignupForUser(user.id);
+    }
+  } catch (error) {
+    console.error("[auth/confirm] complete signup failed:", error instanceof Error ? error.message : "unknown error");
+  }
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -20,12 +38,14 @@ export async function GET(request: NextRequest) {
   if (tokenHash && type) {
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
     if (!error) {
+      await completeSignupIfPending(supabase);
       redirectTo.pathname = next;
       return NextResponse.redirect(redirectTo);
     }
   } else if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      await completeSignupIfPending(supabase);
       redirectTo.pathname = next;
       return NextResponse.redirect(redirectTo);
     }
