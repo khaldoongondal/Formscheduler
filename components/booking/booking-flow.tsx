@@ -17,6 +17,7 @@ import {
   writeVisitorCookie
 } from "@/lib/booking/visitor-id";
 import { FormFooter } from "@/components/booking/form-footer";
+import { postMetaEvents, rememberFbclidSeenAt, type BrowserMetaEvent } from "@/components/booking/meta-bridge";
 import { PhoneInput } from "@/components/booking/phone-input";
 
 type FlowStep = "intake" | "slots" | "booked" | "disqualified";
@@ -30,6 +31,15 @@ interface LeadSessionResponse {
   session: {
     id: string;
   };
+  meta_events?: BrowserMetaEvent[];
+}
+
+interface AnalyticsResponse {
+  meta_event?: BrowserMetaEvent;
+}
+
+interface BookingResponse {
+  meta_events?: BrowserMetaEvent[];
 }
 
 interface SlotResponse {
@@ -46,6 +56,7 @@ interface SubmitAnswersResponse {
   };
   qualified: boolean;
   disqualified: boolean;
+  meta_events?: BrowserMetaEvent[];
 }
 
 interface BookingFlowProps {
@@ -247,6 +258,8 @@ function getCalendarPreviewDays(date = new Date()) {
 function getTrackingParams() {
   const params = new URLSearchParams(window.location.search);
   return {
+    // First time this browser saw the fbclid (decision M13); undefined without one.
+    fbclid_seen_at: rememberFbclidSeenAt(params.get("fbclid")),
     utm_source: params.get("utm_source") ?? undefined,
     utm_medium: params.get("utm_medium") ?? undefined,
     utm_campaign: params.get("utm_campaign") ?? undefined,
@@ -387,6 +400,8 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   const trackedStepViewsRef = useRef<Set<string>>(new Set());
   const pageLoadIdRef = useRef<string | null>(null);
   const formStartedRef = useRef(false);
+  const [metaConsent, setMetaConsent] = useState(false);
+  const metaConsentLabel = funnel.meta_consent_checkbox_label ?? null;
   const splitTestId = splitTest?.id ?? null;
 
   /** One id per page load, sent with every analytics call. */
@@ -403,6 +418,10 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const intakePages = useMemo(() => buildIntakePages(funnel), [funnel]);
   const currentIntakePage = intakePages[intakePageIndex];
+  const lastContactPageIndex = useMemo(
+    () => intakePages.map((page) => page.type).lastIndexOf("contact"),
+    [intakePages]
+  );
   const activeQuestions = useMemo(
     () => intakePages
       .filter((page): page is Extract<IntakePage, { type: "question" }> => page.type === "question")
@@ -462,7 +481,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     removeSplitVisitorQuery();
     const trackingParams = getTrackingParams();
     setVisitorId(id);
-    void postJson("/api/analytics", {
+    void postJson<AnalyticsResponse>("/api/analytics", {
       funnel_id: funnel.id,
       visitor_id: id,
       event_type: "page_view",
@@ -471,7 +490,9 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       user_agent: window.navigator.userAgent,
       ...(splitTestId ? { test_id: splitTestId } : {}),
       metadata: { ...trackingParams, page_load_id: getPageLoadId() }
-    }).catch(() => undefined);
+    })
+      .then((response) => postMetaEvents(response?.meta_event ? [response.meta_event] : undefined))
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per form and mode, like before
   }, [funnel.id, mode]);
 
@@ -519,7 +540,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   function markFormStarted() {
     if (formStartedRef.current) return;
     formStartedRef.current = true;
-    void postJson("/api/analytics", {
+    void postJson<AnalyticsResponse>("/api/analytics", {
       funnel_id: funnel.id,
       lead_session_id: sessionId ?? undefined,
       visitor_id: visitorId ?? getVisitorId(),
@@ -529,7 +550,9 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       user_agent: window.navigator.userAgent,
       ...splitTestPayload(),
       metadata: { ...getTrackingParams(), page_load_id: getPageLoadId() }
-    }).catch(() => undefined);
+    })
+      .then((response) => postMetaEvents(response?.meta_event ? [response.meta_event] : undefined))
+      .catch(() => undefined);
   }
 
   useEffect(() => {
@@ -582,7 +605,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     return null;
   }
 
-  async function ensureLeadSession(values: ContactValues) {
+  async function ensureLeadSession(values: ContactValues, consentGiven = metaConsent) {
     if (sessionId) return sessionId;
 
     const typedFullName = values.full_name?.trim() ?? "";
@@ -606,10 +629,12 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       referrer: document.referrer || undefined,
       fingerprint: resolvedFingerprint,
       ...getTrackingParams(),
-      ...splitTestPayload()
+      ...splitTestPayload(),
+      ...(metaConsentLabel ? { meta_consent: consentGiven } : {})
     });
     const leadSessionId = response.session.id;
     setSessionId(leadSessionId);
+    postMetaEvents(response.meta_events);
     return leadSessionId;
   }
 
@@ -633,11 +658,15 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     }
 
     setContactValues(nextContactValues);
+    // The Meta consent checkbox sits on the last contact page; unticked means no.
+    const consentGiven =
+      metaConsentLabel && intakePageIndex === lastContactPageIndex ? formData.get("meta_consent") === "on" : metaConsent;
+    if (consentGiven !== metaConsent) setMetaConsent(consentGiven);
 
     const allContactFieldsComplete = !getContactValidationError(nextContactValues, activeContactFieldOrder);
     setIsLoading(true);
     try {
-      const leadSessionId = allContactFieldsComplete ? await ensureLeadSession(nextContactValues) : sessionId;
+      const leadSessionId = allContactFieldsComplete ? await ensureLeadSession(nextContactValues, consentGiven) : sessionId;
       await advanceFromIntakePage(leadSessionId ?? undefined);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to continue.");
@@ -673,12 +702,13 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     setError(null);
 
     try {
-      await postJson("/api/bookings", {
+      const booking = await postJson<BookingResponse>("/api/bookings", {
         lead_session_id: sessionId,
         slot_start: slot.startTime,
         slot_end: slot.endTime,
         timezone
       });
+      postMetaEvents(booking?.meta_events);
       if (funnel.redirect_url) {
         redirectAfterBooking(funnel.redirect_url);
         return;
@@ -730,6 +760,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       const hasSavedAnswers = funnel.questions.some((question) => answerSnapshot[question.id] !== undefined);
       if (hasSavedAnswers) {
         const result = await saveAnswers(leadSessionId, answerSnapshot);
+        postMetaEvents(result.meta_events);
         if (result.disqualified) {
           setStep("disqualified");
           return;
@@ -894,6 +925,18 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
                       className="space-y-4 sm:space-y-5"
                     >
                       {currentIntakePage.fields.map((fieldKey) => renderContactField(fieldKey))}
+                      {metaConsentLabel && intakePageIndex === lastContactPageIndex ? (
+                        <label className="flex items-start gap-3 text-sm leading-6 text-slate-700" htmlFor="meta_consent">
+                          <input
+                            id="meta_consent"
+                            name="meta_consent"
+                            type="checkbox"
+                            defaultChecked={metaConsent}
+                            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                          />
+                          <span>{metaConsentLabel}</span>
+                        </label>
+                      ) : null}
                       <div className="space-y-3 pt-1">
                         <button
                           type="submit"

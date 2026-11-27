@@ -16,6 +16,7 @@ import {
   ExternalLink,
   ListChecks,
   Plug,
+  Radio,
   Settings
 } from "lucide-react";
 import {
@@ -29,6 +30,7 @@ import {
   updateAnalyticsTargetCountriesAction,
   updateContactFieldsAction,
   updateFunnelAction,
+  updateFunnelMetaAction,
   uploadLogoAction,
   upsertQuestionAction,
   upsertQuestionOptionAction
@@ -73,6 +75,8 @@ import {
   supportsQuestionDisqualificationRule
 } from "@/lib/funnels/disqualification";
 import { getFunnelById } from "@/lib/funnels/service";
+import { DEFAULT_CONSENT_LABEL } from "@/lib/meta/pixel-input";
+import { listPixels, type PixelSummary } from "@/lib/meta/pixels";
 import { listGhlConnections } from "@/lib/ghl/connections";
 import type { Json, QuestionType } from "@/lib/types/database";
 import { SaveSubmitButton } from "@/components/admin/save-submit-button";
@@ -139,7 +143,7 @@ export default async function FunnelDetailPage({
     to: query.to
   });
   const analyticsState: { error: string | null } = { error: null };
-  const [connections, analytics, planSummary, runningTests, spendEntries] = await Promise.all([
+  const [connections, analytics, planSummary, runningTests, spendEntries, pixels] = await Promise.all([
     listGhlConnections(funnel.tenant_id),
     getFunnelAnalytics(funnel.id, analyticsRange).catch((error: unknown): FunnelPerformanceRow | null => {
       const message = error instanceof Error ? error.message : "";
@@ -154,6 +158,11 @@ export default async function FunnelDetailPage({
     listFormSpend(funnel.tenant_id, funnel.id).catch((error: unknown): AdSpendEntry[] | null => {
       // Null when the spend table is missing (migration 0026 not run yet).
       console.error("[spend] form spend lookup failed", error instanceof Error ? error.message : "unknown error");
+      return null;
+    }),
+    listPixels(funnel.tenant_id).catch((error: unknown): PixelSummary[] | null => {
+      // Null when the pixel table is missing (migration 0027 not run yet).
+      console.error("[meta] pixel list failed", error instanceof Error ? error.message : "unknown error");
       return null;
     })
   ]);
@@ -364,6 +373,7 @@ export default async function FunnelDetailPage({
         <SettingsJump href="#questions" label="Question flow" description="Contact fields, qualification questions, and answers." />
         <SettingsJump href="#logo" label="Logo" description="Drop in an optional first-screen logo file." />
         <SettingsJump href="#embed-links" label="Embed and links" description="Full-page, iframe, and popup snippets." />
+        <SettingsJump href="#meta" label="Meta pixel" description="Send this form's events to Meta from our server." />
       </section>
 
       <section className="space-y-6">
@@ -956,6 +966,18 @@ export default async function FunnelDetailPage({
             </CardContent>
           </Card>
 
+          <Card id="meta" className="scroll-mt-24">
+            <CardHeader>
+              <SectionTitle icon={<Radio className="h-5 w-5" />} title="Meta pixel" />
+              <CardDescription>
+                Send this form&apos;s events to Meta from our server. Only this form&apos;s events go to the pixel you choose.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <MetaPixelSettings funnel={funnel} pixels={pixels} saved={query.saved === "meta"} />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Danger zone</CardTitle>
@@ -996,6 +1018,8 @@ function actionSuccessMessage(saved?: string) {
       return "Ad spend saved.";
     case "spend-deleted":
       return "Ad spend entry deleted.";
+    case "meta":
+      return "Meta settings saved.";
     default:
       return null;
   }
@@ -1740,4 +1764,98 @@ function formatRate(value: number) {
 
 function TakenDownBadge() {
   return <span className="rounded-md bg-red-50 px-2 py-1 text-xs font-semibold text-red-700">Taken down</span>;
+}
+
+function MetaPixelSettings({
+  funnel,
+  pixels,
+  saved
+}: {
+  funnel: {
+    id: string;
+    meta_pixel_id?: string | null;
+    meta_consent_confirmed_at?: string | null;
+    meta_consent_checkbox_enabled?: boolean;
+    meta_consent_checkbox_label?: string | null;
+  };
+  pixels: PixelSummary[] | null;
+  saved: boolean;
+}) {
+  if (pixels === null) {
+    return <p className="text-sm leading-6 text-slate-600">Meta pixels are not available yet. Please try again later.</p>;
+  }
+  if (pixels.length === 0 && !funnel.meta_pixel_id) {
+    return (
+      <p className="text-sm leading-6 text-slate-600">
+        You have no Meta pixels yet. Add one on the{" "}
+        <Link href="/admin/pixels" className="font-semibold text-primary hover:underline">
+          Meta Pixels page
+        </Link>
+        .
+      </p>
+    );
+  }
+
+  return (
+    <form action={updateFunnelMetaAction} className="space-y-5">
+      <input type="hidden" name="id" value={funnel.id} />
+      <div className="space-y-2">
+        <Label htmlFor="meta_pixel_id">Pixel</Label>
+        <select
+          id="meta_pixel_id"
+          name="meta_pixel_id"
+          defaultValue={funnel.meta_pixel_id ?? ""}
+          className="flex h-10 w-full max-w-xl rounded-md border border-input bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option value="">No pixel</option>
+          {pixels.map((pixel) => (
+            <option key={pixel.id} value={pixel.id}>
+              {pixel.name} (pixel {pixel.dataset_id})
+            </option>
+          ))}
+        </select>
+      </div>
+      <label className="flex items-start gap-3 text-sm leading-6 text-slate-700">
+        <input
+          type="checkbox"
+          name="meta_consent_confirmed"
+          defaultChecked={Boolean(funnel.meta_consent_confirmed_at)}
+          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+        />
+        <span>
+          I confirm that I have consent from the people who fill in this form to send their details to Meta, and that my
+          privacy notice says so.
+        </span>
+      </label>
+      <div className="space-y-1">
+        <label className="flex items-start gap-3 text-sm leading-6 text-slate-700">
+          <input
+            type="checkbox"
+            name="meta_consent_checkbox_enabled"
+            defaultChecked={funnel.meta_consent_checkbox_enabled === true}
+            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+          />
+          <span>Show a consent checkbox on the form</span>
+        </label>
+        <p className="pl-7 text-xs leading-5 text-slate-500">
+          When this is on, nothing is sent to Meta for a visitor until they tick the box. Visitors who leave it unticked
+          are never sent.
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="meta_consent_checkbox_label">Checkbox text</Label>
+        <Textarea
+          id="meta_consent_checkbox_label"
+          name="meta_consent_checkbox_label"
+          maxLength={300}
+          rows={2}
+          defaultValue={funnel.meta_consent_checkbox_label ?? DEFAULT_CONSENT_LABEL}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SaveSubmitButton label="Save Meta settings" />
+        {saved ? <SavedBadge label="Meta settings saved" /> : null}
+      </div>
+    </form>
+  );
 }

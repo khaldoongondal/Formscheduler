@@ -10,7 +10,9 @@ import {
 } from "@/lib/ghl/service";
 import { getLeadSession, updateLeadSessionStatus } from "@/lib/lead-sessions/service";
 import { createServiceClient } from "@/lib/supabase/server";
-import type { Json } from "@/lib/types/database";
+import { onLeadStage } from "@/lib/meta/hooks";
+import type { QueuedMetaEvent } from "@/lib/meta/queue";
+import type { BookingAttempt, Json } from "@/lib/types/database";
 import { bookAppointmentSchema, slotLookupSchema } from "@/lib/validation/bookings";
 
 export async function getAvailableSlots(input: unknown) {
@@ -125,7 +127,9 @@ export async function getAvailableSlots(input: unknown) {
   }
 }
 
-export async function bookAppointment(input: unknown) {
+export async function bookAppointment(
+  input: unknown
+): Promise<{ attempt: BookingAttempt; metaEvents: Array<QueuedMetaEvent | null> }> {
   const parsed = bookAppointmentSchema.parse(input);
   const supabase = createServiceClient();
   const session = await getLeadSession(parsed.lead_session_id);
@@ -197,7 +201,7 @@ export async function bookAppointment(input: unknown) {
       .eq("id", session.id);
     if (sessionUpdateError) throw new Error(sessionUpdateError.message);
 
-    await updateLeadSessionStatus(session.id, "booked");
+    const bookedSession = await updateLeadSessionStatus(session.id, "booked");
     await trackEvent({
       tenantId: session.tenant_id,
       funnelId: session.funnel_id,
@@ -208,7 +212,9 @@ export async function bookAppointment(input: unknown) {
       metadata: { mode: "demo_slot_preview", appointment_id: appointmentId, opportunity_id: ghlOpportunityId }
     });
 
-    return updatedAttempt;
+    // Meta booked call. Never throws.
+    const bookedEvent = await onLeadStage("booked_call", bookedSession, publicFunnel);
+    return { attempt: updatedAttempt, metaEvents: [bookedEvent] };
   }
 
   const { funnel, connection, config, calendarId } = await getFunnelGhlConfig(session.funnel_id);
@@ -284,7 +290,7 @@ export async function bookAppointment(input: unknown) {
       .eq("id", session.id);
     if (sessionUpdateError) throw new Error(sessionUpdateError.message);
 
-    await updateLeadSessionStatus(session.id, "booked");
+    const bookedSession = await updateLeadSessionStatus(session.id, "booked");
     await trackEvent({
       tenantId: session.tenant_id,
       funnelId: session.funnel_id,
@@ -295,7 +301,9 @@ export async function bookAppointment(input: unknown) {
       metadata: { appointment_id: appointmentId, opportunity_id: opportunityId }
     });
 
-    return updatedAttempt;
+    // Meta booked call. Never throws, so a Meta problem cannot mark the booking as failed.
+    const bookedEvent = await onLeadStage("booked_call", bookedSession, publicFunnel);
+    return { attempt: updatedAttempt, metaEvents: [bookedEvent] };
   } catch (error) {
     await supabase
       .from("booking_attempts")

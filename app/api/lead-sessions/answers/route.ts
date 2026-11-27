@@ -1,6 +1,7 @@
 import { after, NextRequest } from "next/server";
 import { failPublic, ok } from "@/lib/api/responses";
 import { submitLeadAnswers, syncLeadAnswersToGhl } from "@/lib/lead-sessions/service";
+import { scheduleMetaDrain, toClientEvents } from "@/lib/meta/hooks";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export async function POST(request: NextRequest) {
@@ -9,11 +10,14 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const result = await submitLeadAnswers(body);
+    const { metaEvents, ...result } = await submitLeadAnswers(body);
     after(async () => {
       await syncLeadAnswersToGhl(result.session.id);
     });
-    return ok(result);
+    scheduleMetaDrain(metaEvents);
+    const { ip_address: _ip, ...publicSession } = result.session;
+    void _ip;
+    return ok({ ...result, session: publicSession, meta_events: toClientEvents(metaEvents) });
   } catch (error) {
     return failPublic(error);
   }

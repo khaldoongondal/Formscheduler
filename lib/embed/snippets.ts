@@ -191,3 +191,29 @@ export function buildSplitTestIframeSnippet(embedUrl: string, input: { splitTest
     })
   );
 }
+
+/**
+ * Optional script for the page that embeds a form and also runs the Meta
+ * browser pixel (decision M17). It listens for `formbook:meta-event` messages
+ * from the FormBook origin and fires the same event with the same event ID,
+ * so Meta deduplicates the browser and server events.
+ */
+export function buildBrowserPixelBridgeSnippet(appOrigin: string) {
+  const origin = new URL(appOrigin).origin;
+
+  return `<script>
+(function () {
+  var formbookOrigin = ${JSON.stringify(origin)};
+  var standardEvents = { ViewContent: true, Lead: true, Schedule: true };
+  window.addEventListener("message", function (event) {
+    if (event.origin !== formbookOrigin) return;
+    var data = event.data || {};
+    if (data.type !== "formbook:meta-event") return;
+    if (typeof data.event_name !== "string" || typeof data.event_id !== "string") return;
+    if (typeof window.fbq !== "function") return;
+    var method = standardEvents[data.event_name] ? "track" : "trackCustom";
+    window.fbq(method, data.event_name, {}, { eventID: data.event_id });
+  });
+})();
+</script>`;
+}

@@ -76,7 +76,7 @@ export default async function FunnelsPage({
         )}
       </div>
 
-      <PlanUsage state={planSummary.state} plan={planSummary.plan} usage={planSummary.usage} />
+      <PlanUsage state={planSummary.state} plan={planSummary.plan} usage={planSummary.usage} pixelCount={planSummary.pixelCount} />
 
       {actionError ? <ActionError message={actionError} /> : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}

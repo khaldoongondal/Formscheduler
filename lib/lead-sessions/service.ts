@@ -14,6 +14,11 @@ import {
   updateLeadContactAnswers,
   upsertLeadContact
 } from "@/lib/ghl/service";
+import { isUsableClickTime } from "@/lib/meta/fbc";
+import { leadConsentValue } from "@/lib/meta/gating";
+import { onLead, onLeadStage } from "@/lib/meta/hooks";
+import type { QueuedMetaEvent } from "@/lib/meta/queue";
+import { getClientIp, toStorableIp } from "@/lib/security/client-ip";
 import type { Json, LeadAnswer, LeadSession, Question } from "@/lib/types/database";
 import { startLeadSessionSchema, submitAnswersSchema } from "@/lib/validation/lead-sessions";
 import { isValidWebsiteValue, normalizeWebsiteValue, websiteValidationMessage } from "@/lib/validation/website";
@@ -236,7 +241,10 @@ async function moveDisqualifiedLeadToGhl(
   }
 }
 
-export async function startLeadSession(input: unknown, request?: Request) {
+export async function startLeadSession(
+  input: unknown,
+  request?: Request
+): Promise<{ session: LeadSession; metaEvents: Array<QueuedMetaEvent | null> }> {
   const parsed = startLeadSessionSchema.parse(input);
   const supabase = createServiceClient();
   const funnel = await assertFunnelServesPublic(parsed.funnel_id);
@@ -269,16 +277,29 @@ export async function startLeadSession(input: unknown, request?: Request) {
     split_variant: parsed.split_variant,
     landing_page_url: parsed.landing_page_url
   });
+  // Decision M13: the first time this browser saw the fbclid, kept only when plausible.
+  const fbclidSeenAt =
+    parsed.fbclid && isUsableClickTime(parsed.fbclid_seen_at, Date.now()) ? parsed.fbclid_seen_at : undefined;
   const metadataWithGeo = {
     ...(trackingMetadata as Record<string, Json | undefined>),
+    ...(fbclidSeenAt ? { fbclid_seen_at: fbclidSeenAt } : {}),
     ...getRequestGeoMetadata(request)
   } as Json;
   // Decision S9: only a running test this form belongs to is recorded. Never throws.
   const splitTestId = await resolveRecordedSplitTestId(parsed.test_id, funnel.id, funnel.tenant_id);
+  // Decision M11: the visitor's consent answer, only when the form has a pixel and shows the box.
+  const metaConsent = leadConsentValue(
+    { meta_pixel_id: funnel.meta_pixel_id ?? null, meta_consent_checkbox_enabled: funnel.meta_consent_checkbox_enabled === true },
+    parsed.meta_consent
+  );
+  // Decision M14: the client IP from the trusted header, only when it is a valid address.
+  const ipAddress = request ? toStorableIp(getClientIp(request.headers)) : null;
   const { data: session, error } = await supabase
     .from("lead_sessions")
     .insert({
       ...(splitTestId ? { split_test_id: splitTestId } : {}),
+      ...(metaConsent !== null ? { meta_consent: metaConsent } : {}),
+      ip_address: ipAddress,
       tenant_id: funnel.tenant_id,
       funnel_id: funnel.id,
       status: "started",
@@ -342,7 +363,9 @@ export async function startLeadSession(input: unknown, request?: Request) {
       metadata: { mode: "demo_slot_preview" }
     });
 
-    return updatedSession;
+    // Decision M15: Lead fires when the session reaches potential. Never throws.
+    const leadEvent = await onLead(updatedSession, funnel);
+    return { session: updatedSession, metaEvents: [leadEvent] };
   }
 
   try {
@@ -381,7 +404,9 @@ export async function startLeadSession(input: unknown, request?: Request) {
       userAgent: updatedSession.user_agent ?? undefined
     });
 
-    return updatedSession;
+    // Decision M15: Lead fires when the session reaches potential. Never throws.
+    const leadEvent = await onLead(updatedSession, funnel);
+    return { session: updatedSession, metaEvents: [leadEvent] };
   } catch (error) {
     await supabase
       .from("lead_sessions")
@@ -439,7 +464,7 @@ export async function submitLeadAnswers(input: unknown) {
   const parsed = submitAnswersSchema.parse(input);
   const supabase = createServiceClient();
   const session = await getLeadSession(parsed.lead_session_id);
-  await assertFunnelServesPublic(session.funnel_id);
+  const funnel = await assertFunnelServesPublic(session.funnel_id);
 
   const { data: questions, error: questionError } = await supabase
     .from("questions")
@@ -522,7 +547,8 @@ export async function submitLeadAnswers(input: unknown) {
       }
     });
 
-    return { session: syncedSession, qualified: false, disqualified: true };
+    const disqualifiedEvent = await onLeadStage("disqualified_lead", syncedSession, funnel);
+    return { session: syncedSession, qualified: false, disqualified: true, metaEvents: [disqualifiedEvent] };
   }
 
   const answersByQuestionId = new Map(answers.map((answer) => [answer.question_id, answer]));
@@ -554,7 +580,13 @@ export async function submitLeadAnswers(input: unknown) {
     });
   }
 
-  return { session: updatedSession, qualified: allRequiredAnswered, disqualified: false };
+  const qualifiedEvent = allRequiredAnswered ? await onLeadStage("qualified_lead", updatedSession, funnel) : null;
+  return {
+    session: updatedSession,
+    qualified: allRequiredAnswered,
+    disqualified: false,
+    metaEvents: [qualifiedEvent]
+  };
 }
 
 export async function syncLeadAnswersToGhl(leadSessionId: string) {

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { normalizeAnalyticsTargetCountryCodes, normalizeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
-import { requireTenantRole } from "@/lib/auth/tenant";
+import { getAdminActorEmail, requireTenantRole } from "@/lib/auth/tenant";
 import {
   contactFieldKeys,
   defaultContactFieldOrder,
@@ -32,6 +32,7 @@ import {
   duplicateFunnel,
   getFunnelById,
   updateFunnel,
+  updateFunnelMeta,
   updateQuestionOrder,
   updateQuestion,
   uploadFunnelLogo,
@@ -338,6 +339,33 @@ export async function updateAnalyticsTargetCountriesAction(formData: FormData) {
 
   revalidatePath(`/admin/funnels/${id}`);
   redirect(`/admin/funnels/${id}?saved=analytics-filters#performance`);
+}
+
+export async function updateFunnelMetaAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  try {
+    const { tenantId } = await assertAdminFunnel(id);
+    const actorEmail = await getAdminActorEmail();
+    await updateFunnelMeta(
+      id,
+      tenantId,
+      {
+        meta_pixel_id: trimmedString(formData, "meta_pixel_id"),
+        consent_confirmed: formData.get("meta_consent_confirmed") === "on",
+        checkbox_enabled: formData.get("meta_consent_checkbox_enabled") === "on",
+        checkbox_label: trimmedString(formData, "meta_consent_checkbox_label")
+      },
+      actorEmail
+    );
+  } catch (error) {
+    // Own messages only: the generic admin mapper would turn some of them into migration hints.
+    const message = error instanceof Error && error.message ? error.message : "Something went wrong. Please try again.";
+    redirect(`/admin/funnels/${id}?error=${encodeURIComponent(message)}#meta`);
+  }
+
+  revalidatePath(`/admin/funnels/${id}`);
+  revalidatePath("/admin/pixels");
+  redirect(`/admin/funnels/${id}?saved=meta#meta`);
 }
 
 function spendErrorRedirect(funnelId: string, error: unknown): never {

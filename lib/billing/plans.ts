@@ -16,7 +16,7 @@ export type PlanDefinition = {
   monthlyPriceCents: number;
   maxActiveForms: number;
   maxDraftForms: number;
-  /** Meta pixels per tenant. The pixel table arrives in Sprint 2. */
+  /** Meta pixels per tenant (table meta_pixels, migration 0027). */
   maxPixels: number;
 };
 
@@ -72,7 +72,7 @@ export function formatPlanPrice(plan: PlanDefinition): string {
 
 export type FormUsage = { activeForms: number; draftForms: number };
 export type FormLimitAction = "create_draft" | "activate" | "deactivate";
-export type FormLimitReason = "suspended" | "active_forms" | "draft_forms";
+export type FormLimitReason = "suspended" | "active_forms" | "draft_forms" | "pixels";
 export type FormLimitResult =
   | { allowed: true }
   | { allowed: false; reason: FormLimitReason; message: string };
@@ -109,6 +109,23 @@ export function checkFormLimit(state: PlanState, usage: FormUsage, action: FormL
     : { allowed: false, reason: "draft_forms", message: draftLimitMessage(plan) };
 }
 
+export function pixelLimitMessage(plan: PlanDefinition): string {
+  const noun = plan.maxPixels === 1 ? "Meta pixel" : "Meta pixels";
+  const base = `You have reached the limit of ${plan.maxPixels} ${noun} on the ${plan.name} plan. Remove a pixel first`;
+  return plan.id === "free" ? `${base}, or email ${CONTACT_EMAIL} about the Scaling plan.` : `${base}.`;
+}
+
+/** Pure decision mirroring the meta_pixels limit trigger. `pixelCount` excludes the pixel being changed. */
+export function checkPixelLimit(state: PlanState, pixelCount: number): FormLimitResult {
+  if (state === "suspended") {
+    return { allowed: false, reason: "suspended", message: SUSPENDED_MESSAGE };
+  }
+  const plan = PLANS[state];
+  return pixelCount < plan.maxPixels
+    ? { allowed: true }
+    : { allowed: false, reason: "pixels", message: pixelLimitMessage(plan) };
+}
+
 /**
  * Maps "FORMBOOK_LIMIT:<reason>" anywhere in a message (raised by the database
  * triggers) to the user message, else null. Without a known plan state the
@@ -124,6 +141,8 @@ export function planLimitMessageFromError(message: string, state?: PlanState): s
       return activeLimitMessage(plan);
     case "draft_forms":
       return draftLimitMessage(plan);
+    case "pixels":
+      return pixelLimitMessage(plan);
     case "suspended":
       return SUSPENDED_MESSAGE;
     case "taken_down":

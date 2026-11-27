@@ -7,6 +7,14 @@ import { QUESTION_NOT_FOUND_MESSAGE, questionUpdateFields } from "@/lib/funnels/
 import { buildCopySlug, checkSlug } from "@/lib/funnels/slugs";
 import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
 import { EXTENSION_BY_MIME, sniffImageMime, type SniffedImage } from "@/lib/security/image-sniff";
+import { getPixel } from "@/lib/meta/pixels";
+import {
+  DEFAULT_CONSENT_LABEL,
+  PIXEL_MESSAGES,
+  firstZodMessage,
+  funnelMetaSettingsSchema,
+  resolveFunnelMetaUpdate
+} from "@/lib/meta/pixel-input";
 import { randomSuffix } from "@/lib/security/random";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel, Question, QuestionOption } from "@/lib/types/database";
@@ -64,9 +72,38 @@ export type BookingFunnel = Pick<
   questions: BookingQuestion[];
   /** "Powered by FormBook" badge: free tenants unless the owner switched it off. */
   show_badge: boolean;
+  /**
+   * Text of the Meta consent checkbox. Set only when the form has a pixel, the
+   * consent confirmation and the checkbox switched on; else null (no checkbox).
+   */
+  meta_consent_checkbox_label: string | null;
 };
 
-type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge">;
+type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge" | "meta_consent_checkbox_label">;
+
+/** Decision M11 / P3.6. Null before migration 0027 or when the checkbox does not apply. */
+async function loadMetaConsentCheckboxLabel(funnelId: string): Promise<string | null> {
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from("funnels")
+      .select("meta_pixel_id,meta_consent_confirmed_at,meta_consent_checkbox_enabled,meta_consent_checkbox_label")
+      .eq("id", funnelId)
+      .maybeSingle();
+    if (error) {
+      if (error.code !== "42703") console.error("[meta] consent settings lookup failed", error.message);
+      return null;
+    }
+    const row = data as Pick<
+      Funnel,
+      "meta_pixel_id" | "meta_consent_confirmed_at" | "meta_consent_checkbox_enabled" | "meta_consent_checkbox_label"
+    > | null;
+    if (!row?.meta_pixel_id || !row.meta_consent_confirmed_at || !row.meta_consent_checkbox_enabled) return null;
+    return row.meta_consent_checkbox_label?.trim() || DEFAULT_CONSENT_LABEL;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * One tenant read for public pages: whether the tenant is suspended and whether
@@ -250,11 +287,14 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
   const tenantFlags = await getPublicTenantFlags(funnelBase.tenant_id);
   if (tenantFlags.suspended) return null;
 
-  const { data: questions, error: questionsError } = await supabase
-    .from("questions")
-    .select("id,tenant_id,funnel_id,stable_key,label,help_text,question_type,placeholder,is_required,display_order,validation")
-    .eq("funnel_id", funnelBase.id)
-    .order("display_order", { ascending: true });
+  const [{ data: questions, error: questionsError }, metaConsentCheckboxLabel] = await Promise.all([
+    supabase
+      .from("questions")
+      .select("id,tenant_id,funnel_id,stable_key,label,help_text,question_type,placeholder,is_required,display_order,validation")
+      .eq("funnel_id", funnelBase.id)
+      .order("display_order", { ascending: true }),
+    loadMetaConsentCheckboxLabel(funnelBase.id)
+  ]);
 
   if (questionsError) throw new Error(questionsError.message);
 
@@ -288,6 +328,7 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
   return {
     ...funnelBase,
     show_badge: tenantFlags.showBadge,
+    meta_consent_checkbox_label: metaConsentCheckboxLabel,
     questions: questions.map((question) => ({
       ...question,
       options: options.filter((option) => option.question_id === question.id)
@@ -798,4 +839,68 @@ export async function uploadFunnelLogo(input: { funnelId: string; tenantId: stri
   if (updateError) throw new Error(updateError.message);
 
   return data.publicUrl;
+}
+
+/**
+ * Saves a form's Meta pixel and consent settings (P3.8). The pixel must belong
+ * to the tenant; the database also checks it (trigger and check constraint).
+ */
+export async function updateFunnelMeta(
+  funnelId: string,
+  tenantId: string,
+  input: unknown,
+  actorEmail: string
+): Promise<void> {
+  let parsed;
+  try {
+    parsed = funnelMetaSettingsSchema.parse(input);
+  } catch (error) {
+    throw new Error(firstZodMessage(error) ?? "Please check the Meta settings and try again.");
+  }
+
+  const supabase = createServiceClient();
+  const { data: current, error: currentError } = await supabase
+    .from("funnels")
+    .select("id,meta_pixel_id,meta_consent_confirmed_at,meta_consent_confirmed_by")
+    .eq("id", funnelId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (currentError) {
+    console.error("[meta] funnel settings lookup failed", currentError.message);
+    throw new Error("Meta settings are not available yet. Please try again later.");
+  }
+  if (!current) throw new Error("Not found.");
+
+  if (parsed.meta_pixel_id && !(await getPixel(tenantId, parsed.meta_pixel_id))) {
+    throw new Error(PIXEL_MESSAGES.foreignPixel);
+  }
+
+  const row = current as unknown as {
+    meta_pixel_id: string | null;
+    meta_consent_confirmed_at: string | null;
+    meta_consent_confirmed_by: string | null;
+  };
+  const decision = resolveFunnelMetaUpdate(
+    {
+      meta_pixel_id: row.meta_pixel_id ?? null,
+      meta_consent_confirmed_at: row.meta_consent_confirmed_at ?? null,
+      meta_consent_confirmed_by: row.meta_consent_confirmed_by ?? null
+    },
+    parsed,
+    actorEmail,
+    new Date().toISOString()
+  );
+  if (!decision.ok) throw new Error(decision.message);
+
+  const { error } = await supabase
+    .from("funnels")
+    .update(decision.update)
+    .eq("id", funnelId)
+    .eq("tenant_id", tenantId);
+  if (error) {
+    if (error.message.includes("FORMBOOK_INVALID:meta_pixel")) throw new Error(PIXEL_MESSAGES.foreignPixel);
+    if (error.message.includes("funnels_meta_pixel_needs_consent")) throw new Error(PIXEL_MESSAGES.needConsent);
+    console.error("[meta] funnel settings save failed", error.message);
+    throw new Error("Something went wrong. Please try again.");
+  }
 }

@@ -70,9 +70,28 @@ export async function assertFormLimit(
 
 export async function getTenantPlanSummary(
   tenantId: string
-): Promise<{ state: PlanState; plan: PlanDefinition | null; usage: FormUsage }> {
-  const [state, usage] = await Promise.all([getTenantPlanState(tenantId), getTenantFormUsage(tenantId)]);
-  return { state, plan: state === "suspended" ? null : PLANS[state], usage };
+): Promise<{ state: PlanState; plan: PlanDefinition | null; usage: FormUsage; pixelCount: number | null }> {
+  const [state, usage, pixelCount] = await Promise.all([
+    getTenantPlanState(tenantId),
+    getTenantFormUsage(tenantId),
+    countTenantPixels(tenantId)
+  ]);
+  return { state, plan: state === "suspended" ? null : PLANS[state], usage, pixelCount };
+}
+
+/** Meta pixels of the tenant; null when the table is missing (migration 0027 not run yet). */
+export async function countTenantPixels(tenantId: string): Promise<number | null> {
+  try {
+    const supabase = createServiceClient();
+    const { count, error } = await supabase
+      .from("meta_pixels")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId);
+    if (error) return null;
+    return count ?? 0;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -41,7 +41,7 @@ export default function DpaPage() {
             "answers to the customer's questions;",
             "booking details, such as the chosen time and time zone;",
             "tracking parameters, such as the page and campaign a visitor came from;",
-            "a country derived from the visitor's IP address;",
+            "the visitor's IP address, and a country derived from it;",
             "browser details, such as the browser type."
           ]}
         />

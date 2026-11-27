@@ -10,11 +10,14 @@ import {
 export function PlanUsage({
   state,
   plan,
-  usage
+  usage,
+  pixelCount = null
 }: {
   state: PlanState;
   plan: PlanDefinition | null;
   usage: FormUsage;
+  /** Meta pixels in use; the meter is hidden when null (table not there yet). */
+  pixelCount?: number | null;
 }) {
   if (state === "suspended" || !plan) {
     return (
@@ -34,9 +37,10 @@ export function PlanUsage({
         <h2 className="text-base font-semibold text-slate-950">{plan.name} plan</h2>
         <p className="text-sm font-medium text-slate-600">{formatPlanPrice(plan)}</p>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className={pixelCount === null ? "mt-4 grid gap-4 md:grid-cols-2" : "mt-4 grid gap-4 md:grid-cols-3"}>
         <UsageMeter label="Active forms" used={usage.activeForms} max={plan.maxActiveForms} />
         <UsageMeter label="Drafts" used={usage.draftForms} max={plan.maxDraftForms} />
+        {pixelCount === null ? null : <UsageMeter label="Meta pixels" used={pixelCount} max={plan.maxPixels} />}
       </div>
       {activeFull || draftsFull ? (
         <div className="mt-4 space-y-1 text-sm leading-6 text-amber-900">

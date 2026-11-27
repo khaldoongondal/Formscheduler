@@ -31,7 +31,11 @@ export const startLeadSessionSchema = z
     split_variant: z.string().max(80).optional(),
     landing_page_url: z.string().url().optional(),
     /** Split test the page was served for; the server re-checks it (decision S9). */
-    test_id: z.string().uuid().optional()
+    test_id: z.string().uuid().optional(),
+    /** The Meta consent checkbox on the form; only read when the form shows it. */
+    meta_consent: z.boolean().optional(),
+    /** First time this browser saw the fbclid (ms), for building fbc (decision M13). */
+    fbclid_seen_at: z.number().int().positive().optional()
   })
   .refine((value) => Boolean(value.email || value.phone), {
     message: "Email or phone is required.",

@@ -3,6 +3,7 @@ import { failPublic, ok } from "@/lib/api/responses";
 import { getRequestGeoMetadata } from "@/lib/analytics/country-filter";
 import { trackEvent } from "@/lib/analytics/service";
 import { assertFunnelServesPublic } from "@/lib/funnels/public-gate";
+import { onFormStart, onFormView, scheduleMetaDrain, toClientEvents, type ClientMetaEvent } from "@/lib/meta/hooks";
 import { resolveRecordedSplitTestId } from "@/lib/split-tests/public";
 import { ANALYTICS_MAX_BODY_BYTES } from "@/lib/security/limits";
 import { enforceDailyCap, enforceRateLimit } from "@/lib/security/rate-limit";
@@ -46,8 +47,12 @@ export async function POST(request: NextRequest) {
 
     // Never throws: a bad or forged test id is stored as null.
     const splitTestId = await resolveRecordedSplitTestId(parsed.test_id, funnel.id, funnel.tenant_id);
+    const metadata = {
+      ...(parsed.metadata ?? {}),
+      ...getRequestGeoMetadata(request)
+    } as Record<string, unknown>;
 
-    await trackEvent({
+    const tracked = await trackEvent({
       tenantId: funnel.tenant_id,
       funnelId: funnel.id,
       leadSessionId: parsed.lead_session_id,
@@ -56,13 +61,29 @@ export async function POST(request: NextRequest) {
       source: parsed.source,
       sourceUrl: parsed.source_url,
       userAgent: parsed.user_agent,
-      metadata: {
-        ...(parsed.metadata ?? {}),
-        ...getRequestGeoMetadata(request)
-      } as Json,
+      metadata: metadata as Json,
       splitTestId
     });
-    return ok({ tracked: true }, 201);
+
+    // Meta: form view and form start. No query at all when the form has no pixel; never throws.
+    let metaEvent: ClientMetaEvent | undefined;
+    if (funnel.meta_pixel_id && (parsed.event_type === "page_view" || parsed.event_type === "form_start")) {
+      const hook = parsed.event_type === "page_view" ? onFormView : onFormStart;
+      const queued = await hook({
+        funnel,
+        request,
+        visitorId: parsed.visitor_id,
+        pageLoadId: typeof metadata.page_load_id === "string" ? metadata.page_load_id : undefined,
+        analyticsRowId: tracked.id,
+        splitTestId,
+        sourceUrl: parsed.source_url,
+        metadata
+      });
+      scheduleMetaDrain([queued]);
+      metaEvent = toClientEvents([queued])[0];
+    }
+
+    return ok(metaEvent ? { tracked: true, meta_event: metaEvent } : { tracked: true }, 201);
   } catch (error) {
     return failPublic(error);
   }

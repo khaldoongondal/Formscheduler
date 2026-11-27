@@ -42,7 +42,7 @@ export default function PrivacyPage() {
           Each form belongs to the business that published it. That business is the controller of the answers you give
           and decides what happens to them. FormBook processes your answers on that business&apos;s instructions, for
           example to save your details, check whether a call is a fit, and book a call in the business&apos;s
-          calendar. Questions about your data, including requests to see or delete it, should go to that business
+          calendar. Along with your answers, the form records your IP address and browser details. Questions about your data, including requests to see or delete it, should go to that business
           first. If you cannot reach them, email us and we will pass your request on.
         </p>
       </LegalSection>
@@ -65,6 +65,10 @@ export default function PrivacyPage() {
           When a customer connects a Meta pixel to a form, FormBook sends form events and hashed contact data (such as
           a hashed email address and phone number) to Meta on that customer&apos;s instruction, and only to the pixel the
           customer supplied. The customer is responsible for telling people about this and getting any consent it needs.
+        </p>
+        <p>
+          When a customer connects a Meta pixel, FormBook sends form events to Meta with hashed contact details (such as
+          email and phone), the visitor&apos;s IP address and browser details, and Meta click and browser IDs when present.
         </p>
       </LegalSection>
 

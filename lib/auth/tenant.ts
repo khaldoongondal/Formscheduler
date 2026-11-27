@@ -89,3 +89,17 @@ export async function getAdminTenantId() {
 export async function requireTenantRole(allowedRoles: TenantRole[]) {
   return getAdminTenantContext(allowedRoles);
 }
+
+/** Email of the signed-in admin, recorded on consent confirmations. Dev bypass: dev-owner@localhost. */
+export async function getAdminActorEmail(): Promise<string> {
+  if (process.env.LEADDER_DEFAULT_TENANT_ID && process.env.NODE_ENV !== "production") {
+    return "dev-owner@localhost";
+  }
+  const auth = await createAuthServerClient();
+  const {
+    data: { user }
+  } = await auth.auth.getUser();
+  if (user?.email) return user.email;
+  if (process.env.NODE_ENV !== "production") return "dev-owner@localhost";
+  throw new Error("Authenticated user is required.");
+}

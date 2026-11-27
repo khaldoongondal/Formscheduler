@@ -120,6 +120,14 @@ export interface Funnel {
   /** Set by the platform owner (takedown). A taken-down form cannot be active. */
   taken_down_at: string | null;
   taken_down_reason: string | null;
+  /** Meta pixel this form sends events to (migration 0027). */
+  meta_pixel_id?: string | null;
+  /** The customer's confirmation that they have consent to send lead data to Meta. */
+  meta_consent_confirmed_at?: string | null;
+  meta_consent_confirmed_by?: string | null;
+  /** Show a consent checkbox on the form; unticked leads are never sent. */
+  meta_consent_checkbox_enabled?: boolean;
+  meta_consent_checkbox_label?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -184,6 +192,11 @@ export interface LeadSession {
   metadata: Json;
   /** Running split test this lead came through (migration 0025). */
   split_test_id?: string | null;
+  /** The lead's answer to the Meta consent checkbox; null when not asked (migration 0027). */
+  meta_consent?: boolean | null;
+  /** Set when the tenant fired this lead's held Meta events (hold mode). */
+  meta_released_at?: string | null;
+  meta_released_by?: string | null;
   started_at: string;
   qualified_at: string | null;
   slots_shown_at: string | null;
@@ -296,6 +309,82 @@ export interface AdSpendEntry {
   updated_at: string;
 }
 
+export type MetaSendingMode = "automatic" | "hold";
+
+export interface MetaPixel {
+  id: string;
+  tenant_id: string;
+  name: string;
+  dataset_id: string;
+  /** AES-GCM envelope (encryptSecret). Never selected for display. */
+  access_token_ciphertext: string;
+  token_last_four: string | null;
+  test_event_code: string | null;
+  sending_mode: MetaSendingMode;
+  send_form_view: boolean;
+  send_form_start: boolean;
+  send_lead: boolean;
+  send_qualified_lead: boolean;
+  send_disqualified_lead: boolean;
+  send_booked_call: boolean;
+  last_test_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_summary: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MetaDeliveryEventKey =
+  | "form_view"
+  | "form_start"
+  | "lead"
+  | "qualified_lead"
+  | "disqualified_lead"
+  | "booked_call"
+  | "test_event";
+
+export type MetaDeliveryStatus =
+  | "awaiting_consent"
+  | "held"
+  | "pending"
+  | "sent"
+  | "failed"
+  | "skipped"
+  | "expired"
+  | "cancelled";
+
+export interface MetaEventDelivery {
+  id: string;
+  tenant_id: string;
+  pixel_id: string;
+  funnel_id: string | null;
+  lead_session_id: string | null;
+  split_test_id: string | null;
+  visitor_id: string | null;
+  event_key: MetaDeliveryEventKey;
+  event_name: string;
+  event_id: string;
+  event_time: string;
+  /** The frozen Meta event with user data already hashed; wiped when settled and old. */
+  payload: Json | null;
+  match_keys: string[];
+  status: MetaDeliveryStatus;
+  status_reason: string | null;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  meta_response: Json | null;
+  last_error: string | null;
+  test_event_code_used: string | null;
+  fired_by: string | null;
+  fired_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PlanLimitsRow {
   plan: "free" | "scaling" | "suspended";
   display_name: string;
@@ -402,6 +491,8 @@ export interface Database {
       split_tests: Table<SplitTest>;
       split_test_members: Table<SplitTestMember>;
       ad_spend_entries: Table<AdSpendEntry>;
+      meta_pixels: Table<MetaPixel>;
+      meta_event_deliveries: Table<MetaEventDelivery>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -432,6 +523,44 @@ export interface Database {
       owner_list_clients: {
         Args: Record<string, never>;
         Returns: OwnerClientListRow[];
+      };
+      meta_link_visitor_events: {
+        Args: {
+          p_tenant_id: string;
+          p_funnel_id: string;
+          p_visitor_id: string;
+          p_lead_session_id: string;
+          p_consent: "granted" | "declined" | "not_asked";
+          p_hold: boolean;
+        };
+        Returns: number;
+      };
+      claim_meta_deliveries: {
+        Args: { p_owner: string; p_limit?: number; p_lease_seconds?: number };
+        Returns: MetaEventDelivery[];
+      };
+      claim_meta_deliveries_by_ids: {
+        Args: { p_ids: string[]; p_owner: string; p_lease_seconds?: number };
+        Returns: MetaEventDelivery[];
+      };
+      settle_meta_delivery: {
+        Args: {
+          p_id: string;
+          p_owner: string;
+          p_outcome: "sent" | "retry" | "failed" | "skipped";
+          p_error?: string | null;
+          p_reason?: string | null;
+          p_response?: Json | null;
+        };
+        Returns: boolean;
+      };
+      release_meta_delivery: {
+        Args: { p_id: string; p_owner: string };
+        Returns: boolean;
+      };
+      meta_housekeeping: {
+        Args: Record<string, never>;
+        Returns: Json;
       };
     };
     Enums: {

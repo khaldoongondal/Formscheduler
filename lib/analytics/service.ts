@@ -222,16 +222,17 @@ export async function trackEvent(input: TrackEventInput) {
   // working on a database without migration 0025.
   if (input.splitTestId) row.split_test_id = input.splitTestId;
 
-  const { error } = await supabase.from("analytics_events").insert(row);
+  const { data, error } = await supabase.from("analytics_events").insert(row).select("id").single();
   if (error && input.splitTestId && isMissingColumnError(error)) {
     const { split_test_id: _dropped, ...withoutTest } = row;
     void _dropped;
-    const retry = await supabase.from("analytics_events").insert(withoutTest);
+    const retry = await supabase.from("analytics_events").insert(withoutTest).select("id").single();
     if (retry.error) throw new Error(retry.error.message);
-    return;
+    return { id: retry.data.id as string };
   }
 
   if (error) throw new Error(error.message);
+  return { id: data.id as string };
 }
 
 function isMissingColumnError(error: { code?: string; message?: string }) {

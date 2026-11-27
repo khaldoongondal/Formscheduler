@@ -7,6 +7,8 @@
  * change the key while the Vercel header is present.
  */
 
+import { isIP } from "node:net";
+
 const MAX_IP_LENGTH = 64;
 
 function firstEntry(value: string | null): string | null {
@@ -38,4 +40,12 @@ export function getClientIp(headers: Headers): string {
     firstEntry(headers.get("x-forwarded-for"));
 
   return candidate ? normalizeIp(candidate) : "unknown";
+}
+
+/**
+ * The IP as stored on lead_sessions.ip_address (inet) and sent to Meta: the
+ * value when it is a valid IPv4 or IPv6 address, else null ("unknown").
+ */
+export function toStorableIp(ip: string): string | null {
+  return typeof ip === "string" && isIP(ip) !== 0 ? ip : null;
 }
