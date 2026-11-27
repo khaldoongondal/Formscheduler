@@ -1,0 +1,20 @@
+{
+  "source": "Made-up sample for tests.",
+  "scale": 1,
+  "label": "Sample data. Volumes are not real.",
+  "expected_totals": { "visitors": 330, "form_starts": 66, "leads": 22, "bookings": 15, "spend_cents": 150000 },
+  "forms": [
+    { "key": "form_a", "name": "Form A", "slug_suffix": "form-a" },
+    { "key": "form_b", "name": "Form B", "slug_suffix": "form-b" },
+    { "key": "form_c", "name": "Form C", "slug_suffix": "form-c" }
+  ],
+  "periods": [
+    { "form": "form_a", "split_test": "ab", "start": "2026-01-05", "end": "2026-01-11", "visitors": 100, "form_starts": 20, "leads": 8, "bookings": 6, "spend_cents": 50000, "cost_per_lead_cents": 6250 },
+    { "form": "form_b", "split_test": "ab", "start": "2026-01-05", "end": "2026-01-11", "visitors": 110, "form_starts": 24, "leads": 9, "bookings": 5, "spend_cents": 60000, "cost_per_lead_cents": null },
+    { "form": "form_c", "start": "2026-01-01", "end": "2026-01-04", "visitors": 120, "form_starts": 22, "leads": 5, "bookings": 4, "spend_cents": 40000, "cost_per_lead_cents": 8000 }
+  ],
+  "split_tests": [
+    { "key": "ab", "name": "Form A versus Form B", "slug_suffix": "ab-test", "status": "running", "started_at": "2026-01-05T05:00:00Z", "forms": ["form_a", "form_b"] }
+  ],
+  "stage_rules": { "qualified": "every lead that booked", "disqualified": 0, "calendar_shown": "every lead" }
+}

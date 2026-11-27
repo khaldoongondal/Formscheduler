@@ -20,7 +20,9 @@ import {
 } from "@/app/(admin)/admin/split-tests/split-test-ui";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { CopySnippetButton } from "@/components/admin/copy-snippet-button";
+import { SampleDataBanner } from "@/components/admin/sample-data-banner";
 import { SaveSubmitButton } from "@/components/admin/save-submit-button";
+import { getDemoSeedBatch } from "@/lib/demo/marks";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +70,7 @@ export default async function SplitTestDetailPage({
   const tenantId = await getAdminTenantId();
   const test = await getSplitTest(tenantId, id);
   if (!test) notFound();
+  const demoSeedBatch = await getDemoSeedBatch(tenantId, "split_tests", test.id);
 
   const query = searchParams ? await searchParams : {};
   const actionError = typeof query.error === "string" ? query.error : null;
@@ -134,6 +137,7 @@ export default async function SplitTestDetailPage({
         </p>
       </div>
 
+      {demoSeedBatch ? <SampleDataBanner /> : null}
       {actionError ? <ActionError message={actionError} /> : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
 

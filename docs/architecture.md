@@ -147,6 +147,46 @@ Admin funnel performance currently reports:
 
 Date filters support today, yesterday, last 7 days, last 30 days, and custom ranges.
 
+## Meta events
+
+A tenant can add Meta pixels (`meta_pixels`: dataset id, access token encrypted with `LEADDER_TOKEN_ENCRYPTION_KEY`, optional test event code). Each form chooses one pixel or none, and only after the tenant confirms they have consent to send lead data to Meta. Meta is contacted only for forms that use a pixel, and only from the server through the Conversions API. The Graph API version is the one constant `META_GRAPH_API_VERSION` in `lib/meta/constants.ts`; the token travels in the request body, never in a URL, and is never logged.
+
+| FormBook event | Meta name | Standard or custom | When it fires | On by default |
+|---|---|---|---|---|
+| Form view | `ViewContent` | Standard | A visitor opens the form. | Yes |
+| Form start | `FormStart` | Custom | A visitor answers the first question or starts typing. | Yes |
+| Lead | `Lead` | Standard | A visitor submits their contact details. | Yes |
+| Qualified lead | `QualifiedLead` | Custom | A lead answers every required question without being disqualified. | Yes |
+| Disqualified lead | `DisqualifiedLead` | Custom | A lead gives an answer that disqualifies them. | No |
+| Booked call | `Schedule` | Standard | A lead books a call. | Yes |
+
+Each event can be switched on or off per pixel. The "Send test event" button sends one `ViewContent` with the pixel's test event code; it is the only Meta call made at the user's request.
+
+**Event id.** `fbk1.{event}.{ref}`, where `ref` is the browser's page load id for form view and form start, the lead session id for the four lead events, and a random id for test events. The same event always gets the same id, and the queue has a unique index on `(pixel_id, event_id)`, so retries never count twice.
+
+**User data.** Hashed with SHA-256 after normalising: email, phone, first and last name, city, region, country and external id (the visitor id). Sent as is: client IP address, user agent, `fbp` and `fbc` (built from `fbclid` when the cookie is missing, using the time the browser first saw that click id).
+
+**Queue and log.** `meta_event_deliveries` is both the delivery queue and the event log the tenant reads at `/admin/pixels/{id}/events` (and per lead at `/admin/leads/{id}`). Rows are sent right after the response with `after()` and every 5 minutes by `GET /api/cron/meta-events` (Bearer `CRON_SECRET`). Failed sends are retried with backoff (up to 6 attempts). A failure never blocks or slows lead capture or booking. The log never shows payloads or tokens.
+
+| Status | Meaning |
+|---|---|
+| `awaiting_consent` | Sent only if the visitor ticks the consent box. Cancelled after 24 hours. |
+| `held` | Waiting for the tenant to send it (pixel in "Hold for review" mode). Can be sent for 7 days. |
+| `pending` | Queued for Meta; retried on failure. |
+| `sent` | Meta received it. |
+| `failed` | Meta did not accept it, or every retry failed. |
+| `skipped` | Not sent because of a setting at send time (event switched off, pixel removed). |
+| `expired` | Older than Meta's 7-day limit. |
+| `cancelled` | The visitor did not give consent. |
+
+**Hold and fire.** In "Hold for review" mode new events wait as `held`. "Send held events to Meta" on a lead's page releases that lead's events (including its earlier view and start) and marks the lead released, so its later events go out automatically. "Send all held events" on the pixel page releases every held event of the pixel. Switching back to automatic does not send events that are already held.
+
+**Consent.** With the optional consent checkbox on a form, view and start events wait for the visitor's answer; a visitor who does not tick it gets nothing sent, ever.
+
+**Match quality.** `/admin/pixels/{id}/quality` shows how often queued events carry each match key, computed from our own log. It is not Meta's Event Match Quality score.
+
+**Browser deduplication.** After an event is queued, the form posts `{ type: "formbook:meta-event", event_name, event_id }` to the parent page (and opener) with `postMessage`. The optional browser pixel bridge snippet on the pixel settings page listens for it and calls `fbq('track' | 'trackCustom', event_name, {}, { eventID: event_id })`, so a site that also runs the Meta browser pixel reports each event once.
+
 ## Security Review
 
 - GHL credentials remain server-side.

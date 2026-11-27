@@ -84,6 +84,7 @@ import { SetupRequired } from "@/components/setup/setup-required";
 import { CopySnippetButton } from "@/components/admin/copy-snippet-button";
 import { LogoDropInput } from "@/components/admin/logo-drop-input";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
+import { SampleDataBanner } from "@/components/admin/sample-data-banner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -262,6 +263,7 @@ export default async function FunnelDetailPage({
         </div>
       </div>
 
+      {funnel.demo_seed_batch ? <SampleDataBanner /> : null}
       {actionError ? <ActionError message={actionError} /> : null}
       {bookingSetupWarning ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">

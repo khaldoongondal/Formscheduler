@@ -4,6 +4,101 @@ FormBook is a tool from Gondal Tech. Production address after the move: `https:/
 
 Pushing `main` deploys production on Vercel. Production has no staging copy, so follow the checklist below in order and do not skip the backup.
 
+## Sprint 2 release checklist
+
+Sprint 2 adds split tests, split test results and ad spend, Meta pixels with server-side events (Conversions API), the Meta event log and match quality view, and a demo seed script. Follow the steps in order.
+
+### 1. Back up production first
+
+Supabase dashboard: Database, Backups, take a manual backup (or run `pg_dump` against the production connection string and keep the file somewhere safe).
+
+### 2. Apply the new migrations in order
+
+Each file is additive and safe to run twice. Run the verification query after each one.
+
+- `0025_split_tests.sql`:
+
+  ```sql
+  select enumlabel from pg_enum e join pg_type t on t.oid = e.enumtypid
+  where t.typname = 'analytics_event_type' and enumlabel = 'form_start';
+  select column_name from information_schema.columns
+  where table_schema = 'public' and column_name = 'split_test_id' and table_name in ('analytics_events', 'lead_sessions');
+  select tgname from pg_trigger where tgrelid in ('public.split_tests'::regclass, 'public.split_test_members'::regclass) and not tgisinternal;
+  ```
+
+- `0026_ad_spend.sql`:
+
+  ```sql
+  select relrowsecurity from pg_class where oid = 'public.ad_spend_entries'::regclass;   -- true
+  ```
+
+- `0027_meta_pixels_and_events.sql`:
+
+  ```sql
+  select conname from pg_constraint where conname in ('funnels_meta_pixel_needs_consent', 'funnels_meta_consent_lengths');
+  select tgname from pg_trigger where tgrelid = 'public.meta_pixels'::regclass and not tgisinternal;
+  select count(*) from public.funnels where meta_pixel_id is not null;   -- 0 right after the migration
+  ```
+
+- `0028_meta_controls_and_demo_marks.sql`:
+
+  ```sql
+  select proname from pg_proc where proname in ('meta_release_held', 'meta_match_key_coverage');
+  ```
+
+- After all four, the API roles have nothing on the new objects:
+
+  ```sql
+  select table_name, grantee, privilege_type from information_schema.role_table_grants
+  where table_schema = 'public' and grantee in ('anon', 'authenticated')
+    and table_name in ('split_tests', 'split_test_members', 'ad_spend_entries', 'meta_pixels', 'meta_event_deliveries');   -- no rows
+  select p.proname, r.rolname from pg_proc p cross join pg_roles r
+  where p.pronamespace = 'public'::regnamespace and r.rolname in ('anon', 'authenticated')
+    and p.proname in ('enforce_split_test_member_rules', 'enforce_split_test_rules', 'enforce_ad_spend_scope', 'enforce_meta_pixel_limit',
+      'enforce_funnel_pixel_tenant', 'meta_link_visitor_events', 'claim_meta_deliveries', 'claim_meta_deliveries_by_ids',
+      'settle_meta_delivery', 'release_meta_delivery', 'meta_housekeeping', 'meta_release_held', 'meta_match_key_coverage')
+    and has_function_privilege(r.rolname, p.oid, 'execute');   -- no rows
+  select relname, relrowsecurity from pg_class
+  where oid in ('public.split_tests'::regclass, 'public.split_test_members'::regclass, 'public.ad_spend_entries'::regclass,
+                'public.meta_pixels'::regclass, 'public.meta_event_deliveries'::regclass);   -- all true
+  ```
+
+### 3. Vercel production environment variables
+
+- Add `CRON_SECRET` (random, 32 or more characters). It protects `/api/cron/meta-events`; Vercel sends it as a Bearer token.
+- Confirm `LEADDER_TOKEN_ENCRYPTION_KEY` is unchanged. Meta pixel tokens are encrypted with it, like GoHighLevel tokens.
+
+### 4. Vercel plan
+
+`vercel.json` schedules the cron every 5 minutes. Confirm the project's plan allows a 5-minute cron before deploying. After the deploy, the Cron Jobs tab shows `/api/cron/meta-events` returning 200.
+
+### 5. Deploy
+
+### 6. Smoke test: split tests
+
+Create a test with two active forms of the demo account and start it. Open `/t/{slug}` in two browsers and in a private window and reload each twice (each visitor keeps the same form). Embed `/embed/t/{slug}` on a page of another domain and repeat in Chrome, Safari and Firefox. Check the counts on the results page. End the test with a winner and confirm the link now serves the winner.
+
+### 7. Smoke test: Meta
+
+Use the demo account's own pixel and a test event code from the Test events tab in Events Manager.
+
+- Add the pixel. A second pixel on the Free plan is refused.
+- "Send test event" succeeds and the event shows under Test events. If Meta refuses the token in the request body, change `lib/meta/send.ts` to send it in an `Authorization: Bearer` header and redeploy. If Meta refuses the API version, change `META_GRAPH_API_VERSION` in `lib/meta/constants.ts`.
+- Attach the pixel to a form with the consent confirmation. Submit a lead, answer the questions and book. The event log shows form view, form start, lead, qualified lead and booked call as `Sent` within a minute, without waiting for the cron, each with match keys. Events Manager shows them under Test events.
+- Read the Meta response of one sent row and one failed row (make one fail with a second pixel that has a wrong pixel ID).
+- Turn on the consent checkbox. Submit a lead without ticking it: its view and start rows show `Cancelled` and nothing else is queued. Tick it on another lead: its rows are sent.
+- Switch the pixel to "Hold for review". Submit a lead: its rows are `Held`. "Send held events to Meta" on the lead's page sends them, and a later booking for that lead is sent automatically.
+- With the browser pixel bridge snippet and the Meta browser pixel on the embedding page, Events Manager shows the browser and server events as deduplicated.
+- Remove the test event code when done.
+
+### 8. Demo seed (optional)
+
+```sh
+node scripts/seed-demo.mjs --config <seed config json> --tenant <demo tenant id> --batch demo-2026-11-26 > demo.sql
+```
+
+The script only prints SQL; it never connects to a database. Read the SQL, set the demo tenant to the Scaling plan in `/admin/clients`, run the SQL in the Supabase SQL editor, and compare the final check query with the totals in the seed config. Forms and split tests it creates show a "Sample data" banner. To remove the batch, run the script with `--batch <name> --remove` and run the delete SQL it prints.
+
 ## Sprint 1 release checklist
 
 ### 1. Back up production first

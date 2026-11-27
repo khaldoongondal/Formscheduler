@@ -128,6 +128,8 @@ export interface Funnel {
   /** Show a consent checkbox on the form; unticked leads are never sent. */
   meta_consent_checkbox_enabled?: boolean;
   meta_consent_checkbox_label?: string | null;
+  /** Set on demo forms made by scripts/seed-demo.mjs (migration 0028). */
+  demo_seed_batch?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -282,6 +284,8 @@ export interface SplitTest {
   winner_funnel_id: string | null;
   started_at: string | null;
   ended_at: string | null;
+  /** Set on demo tests made by scripts/seed-demo.mjs (migration 0028). */
+  demo_seed_batch?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -383,6 +387,38 @@ export interface MetaEventDelivery {
   sent_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** One row of meta_match_key_coverage (migration 0028). */
+export interface MetaMatchKeyCoverageRow {
+  event_key: string;
+  events: number;
+  with_em: number;
+  with_ph: number;
+  with_fn: number;
+  with_ln: number;
+  with_ip: number;
+  with_ua: number;
+  with_fbp: number;
+  with_fbc: number;
+  with_external_id: number;
+  with_location: number;
+}
+
+/** One row of meta_match_key_coverage (migration 0028). */
+export interface MetaMatchKeyCoverageRow {
+  event_key: string;
+  events: number;
+  with_em: number;
+  with_ph: number;
+  with_fn: number;
+  with_ln: number;
+  with_ip: number;
+  with_ua: number;
+  with_fbp: number;
+  with_fbc: number;
+  with_external_id: number;
+  with_location: number;
 }
 
 export interface PlanLimitsRow {
@@ -561,6 +597,14 @@ export interface Database {
       meta_housekeeping: {
         Args: Record<string, never>;
         Returns: Json;
+      };
+      meta_release_held: {
+        Args: { p_tenant_id: string; p_pixel_id: string | null; p_lead_session_id: string | null; p_by: string };
+        Returns: string[];
+      };
+      meta_match_key_coverage: {
+        Args: { p_tenant_id: string; p_pixel_id: string; p_from: string; p_to: string };
+        Returns: MetaMatchKeyCoverageRow[];
       };
     };
     Enums: {

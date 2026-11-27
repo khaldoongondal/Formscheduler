@@ -20,7 +20,10 @@ export const PIXEL_COPY = {
 export const PIXEL_SAVED_MESSAGES: Record<string, string> = {
   created: "Pixel added.",
   saved: "Pixel saved.",
-  deleted: "Pixel deleted."
+  deleted: "Pixel deleted.",
+  sending: "Sending settings saved.",
+  "test-ok": "Meta received the test event. Check the Test events tab in Events Manager.",
+  "nothing-held": "There are no held events to send."
 };
 
 export function usageLine(count: number, max: number, planName: string) {
