@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { getRequestGeoMetadata } from "@/lib/analytics/country-filter";
+import { type ClientMetaEvent, leadEventRef, toClientEvents } from "@/lib/meta/client-events";
 import { drainMetaDeliveriesByIds } from "@/lib/meta/drain";
 import { isValidEventRef } from "@/lib/meta/events";
 import type { UserDataInput } from "@/lib/meta/hash";
@@ -19,7 +20,7 @@ import type { Funnel, Json, LeadSession } from "@/lib/types/database";
  * This is the only Meta module that uses `after()`.
  */
 
-export type ClientMetaEvent = { event_name: string; event_id: string };
+export type { ClientMetaEvent };
 
 type MetadataRecord = Record<string, unknown>;
 
@@ -44,12 +45,7 @@ function logError(message: string, error: unknown) {
   console.error(`[meta] ${message}`, detail.slice(0, 200));
 }
 
-/** Only events that may still go to Meta are told to the browser (decision M11). */
-export function toClientEvents(rows: Array<QueuedMetaEvent | null | undefined>): ClientMetaEvent[] {
-  return rows
-    .filter((row): row is QueuedMetaEvent => Boolean(row) && (row!.status === "pending" || row!.status === "held"))
-    .map((row) => ({ event_name: row.eventName, event_id: row.eventId }));
-}
+export { leadEventRef, toClientEvents };
 
 function scheduleDrainIds(ids: string[]) {
   if (!ids.length) return;
@@ -154,14 +150,14 @@ function leadUser(session: LeadSession): UserDataInput {
   };
 }
 
-function leadEnqueueInput(session: LeadSession, funnel: Funnel) {
+function leadEnqueueInput(session: LeadSession, funnel: Funnel, eventRef: string) {
   const metadata = asRecord(session.metadata);
   return {
     funnel,
     lead: session,
     visitorId: session.visitor_id,
     splitTestId: session.split_test_id ?? null,
-    eventRef: session.id,
+    eventRef,
     eventTimeMs: Date.now(),
     sourceUrl: session.source_url,
     landingPageUrl: stringField(metadata, "landing_page_url"),
@@ -204,7 +200,13 @@ export async function onLead(session: LeadSession, funnel: Funnel): Promise<Queu
     if (!pixel) return null;
     const hold = pixel.sending_mode === "hold" && !session.meta_released_at;
     await linkVisitorEventsToLead(funnel, session, hold);
-    const queued = await enqueueMetaEvent({ key: "lead", ...leadEnqueueInput(session, funnel), pixel });
+    const eventRef = leadEventRef(session);
+    if (!eventRef) {
+      logError("lead hook skipped", new Error("lead has no meta_event_ref"));
+      if (session.visitor_id) scheduleLinkedRowsDrain(session, null);
+      return null;
+    }
+    const queued = await enqueueMetaEvent({ key: "lead", ...leadEnqueueInput(session, funnel, eventRef), pixel });
     if (session.visitor_id) scheduleLinkedRowsDrain(session, queued?.id ?? null);
     return queued;
   } catch (error) {
@@ -220,7 +222,12 @@ export async function onLeadStage(
 ): Promise<QueuedMetaEvent | null> {
   if (!funnel.meta_pixel_id) return null;
   try {
-    return await enqueueMetaEvent({ key, ...leadEnqueueInput(session, funnel) });
+    const eventRef = leadEventRef(session);
+    if (!eventRef) {
+      logError(`${key} hook skipped`, new Error("lead has no meta_event_ref"));
+      return null;
+    }
+    return await enqueueMetaEvent({ key, ...leadEnqueueInput(session, funnel, eventRef) });
   } catch (error) {
     logError(`${key} hook failed`, error);
     return null;

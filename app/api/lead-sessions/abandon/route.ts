@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { failPublic, ok } from "@/lib/api/responses";
+import { toAbandonResponse } from "@/lib/lead-sessions/public";
 import { abandonLeadSession } from "@/lib/lead-sessions/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
   try {
     const parsed = abandonSchema.parse(await request.json());
     const session = await abandonLeadSession(parsed.lead_session_id);
-    return ok({ session });
+    return ok({ session: toAbandonResponse(session) });
   } catch (error) {
     return failPublic(error);
   }

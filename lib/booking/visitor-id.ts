@@ -30,6 +30,15 @@ export function getVisitorId() {
 }
 
 /**
+ * The id to keep in the visitor cookie: only the id the server used to pick
+ * the split test form. Null when the server used its own IP and user agent
+ * key, so that key stays the single source of truth for this visitor.
+ */
+export function visitorCookieToWrite(initialVisitorId: string | null | undefined): string | null {
+  return isValidVisitorId(initialVisitorId) ? initialVisitorId : null;
+}
+
+/**
  * Writes the visitor cookie. Partitioned and SameSite=None so it also works
  * inside third-party iframes in browsers that support partitioned cookies.
  */

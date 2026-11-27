@@ -32,7 +32,7 @@ const DRAIN_NOW_LIMIT = 20;
 const GENERIC_MESSAGE = "Something went wrong. Please try again.";
 
 const DELIVERY_LIST_COLUMNS =
-  "id,event_key,event_name,event_time,status,status_reason,match_keys,attempts,meta_response,last_error,created_at,sent_at,fired_by,lead_session_id,funnel_id";
+  "id,event_key,event_name,event_time,status,status_reason,match_keys,attempts,meta_response,last_error,created_at,sent_at,fired_by,lead_session_id,funnel_id,test_event_code_used";
 
 export type DeliveryListRow = {
   id: string;
@@ -50,6 +50,8 @@ export type DeliveryListRow = {
   fired_by: string | null;
   lead_session_id: string | null;
   funnel_id: string | null;
+  /** The test event code the row was sent with; Meta does not count such events for ads. */
+  test_event_code_used: string | null;
   funnel_name: string | null;
   lead_label: string;
 };
@@ -134,6 +136,21 @@ export async function updatePixelSending(
       .eq("id", pixelId);
     if (error) throw new Error(error.message);
   });
+}
+
+/** Rows of a pixel that are queued to send now (pending), for example after Fire all. */
+export async function countQueued(tenantId: string, pixelId: string): Promise<number> {
+  noStore();
+  if (!isUuid(pixelId)) return 0;
+  const supabase = createServiceClient();
+  const { count, error } = await supabase
+    .from("meta_event_deliveries")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("pixel_id", pixelId)
+    .eq("status", "pending");
+  if (error) throw new Error(error.message);
+  return count ?? 0;
 }
 
 export async function countHeld(tenantId: string, pixelId: string): Promise<number> {

@@ -16,7 +16,8 @@ begin
 end $$;
 
 -- Fire: release held rows (one lead, or every held row of a pixel) and mark the leads released.
--- Rows older than 7 days minus 1 hour are not released (housekeeping expires them).
+-- Rows older than 7 days minus 1 hour are not released (housekeeping expires them),
+-- and neither are rows of a form that no longer sends to this pixel.
 create or replace function public.meta_release_held(
   p_tenant_id uuid, p_pixel_id uuid, p_lead_session_id uuid, p_by text
 ) returns setof uuid
@@ -45,6 +46,19 @@ begin
       and q.event_time > now() - interval '7 days' + interval '1 hour'
       and (p_pixel_id is null or q.pixel_id = p_pixel_id)
       and (p_lead_session_id is null or q.lead_session_id = p_lead_session_id)
+      -- Only rows whose form still uses this pixel with the customer's consent
+      -- confirmation, is live, and belongs to a tenant that is not suspended.
+      and exists (
+        select 1 from public.funnels f
+        join public.tenants t on t.id = f.tenant_id
+        where f.id = q.funnel_id
+          and f.tenant_id = q.tenant_id
+          and f.meta_pixel_id = q.pixel_id
+          and f.meta_consent_confirmed_at is not null
+          and f.is_published
+          and f.taken_down_at is null
+          and t.plan <> 'suspended'
+      )
     returning q.id, q.lead_session_id
   ), marked as (
     update public.lead_sessions ls

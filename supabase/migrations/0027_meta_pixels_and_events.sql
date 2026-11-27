@@ -114,6 +114,11 @@ alter table public.lead_sessions
   add column if not exists meta_consent boolean,
   add column if not exists meta_released_at timestamptz,
   add column if not exists meta_released_by text;
+-- Opaque per-lead reference used in Meta event ids. Event ids are posted to the
+-- embedding page, so they must never carry the session id (it authorises the
+-- public lead APIs). Existing rows each get their own random value.
+alter table public.lead_sessions
+  add column if not exists meta_event_ref uuid not null default gen_random_uuid();
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'lead_sessions_meta_released_by_length') then
@@ -160,6 +165,8 @@ create table if not exists public.meta_event_deliveries (
 );
 create index if not exists meta_event_deliveries_claimable_idx
   on public.meta_event_deliveries (next_attempt_at) where status = 'pending';
+create index if not exists meta_event_deliveries_claim_order_idx
+  on public.meta_event_deliveries (event_time) where status = 'pending';
 create index if not exists meta_event_deliveries_pixel_created_idx
   on public.meta_event_deliveries (pixel_id, created_at desc);
 create index if not exists meta_event_deliveries_pixel_event_time_idx
@@ -251,7 +258,9 @@ begin
     where c.status = 'pending' and c.attempts < c.max_attempts and c.next_attempt_at <= now()
       and (c.lease_expires_at is null or c.lease_expires_at < now())
       and c.event_time > now() - interval '7 days'
-    order by c.next_attempt_at
+    -- Oldest events first, so a large release (Fire all) sends the rows
+    -- closest to Meta's 7-day limit before they expire.
+    order by c.event_time, c.next_attempt_at
     limit greatest(1, least(p_limit, 50))
     for update skip locked
   )

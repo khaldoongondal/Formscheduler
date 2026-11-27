@@ -13,8 +13,10 @@ import {
   PIXEL_MESSAGES,
   firstZodMessage,
   funnelMetaSettingsSchema,
+  pixelDetached,
   resolveFunnelMetaUpdate
 } from "@/lib/meta/pixel-input";
+import { funnelCopyPayload } from "@/lib/funnels/copy-payload";
 import { randomSuffix } from "@/lib/security/random";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel, Question, QuestionOption } from "@/lib/types/database";
@@ -635,28 +637,13 @@ export async function duplicateFunnel(id: string) {
   const generatedSlug = buildCopySlug(source.slug, suffix);
   const duplicatedSlug = checkSlug(generatedSlug).ok ? generatedSlug : `form-copy-${suffix}`;
 
-  // Explicit payload (decision D6): never copy the id, timestamps, the active
-  // state or the takedown columns.
-  const {
-    questions,
-    id: _sourceId,
-    created_at: _createdAt,
-    updated_at: _updatedAt,
-    is_published: _isPublished,
-    taken_down_at: _takenDownAt,
-    taken_down_reason: _takenDownReason,
-    ...sourceFunnel
-  } = source;
-  void [_sourceId, _createdAt, _updatedAt, _isPublished, _takenDownAt, _takenDownReason];
+  // Explicit payload (decision D6 and Sprint 2): see funnelCopyPayload for the
+  // columns that are never copied, including the Meta pixel and consent.
+  const { questions } = source;
 
   const { data: funnel, error: funnelError } = await supabase
     .from("funnels")
-    .insert({
-      ...sourceFunnel,
-      name: `${source.name} Copy`,
-      slug: duplicatedSlug,
-      is_published: false
-    })
+    .insert(funnelCopyPayload(source, duplicatedSlug))
     .select("*")
     .single();
 
@@ -902,5 +889,30 @@ export async function updateFunnelMeta(
     if (error.message.includes("funnels_meta_pixel_needs_consent")) throw new Error(PIXEL_MESSAGES.needConsent);
     console.error("[meta] funnel settings save failed", error.message);
     throw new Error("Something went wrong. Please try again.");
+  }
+
+  // The old pixel no longer receives anything this form queued: waiting,
+  // held and pending rows are cancelled and their data wiped. The drain also
+  // re-checks the form at send time, so a row already being sent stops there.
+  if (pixelDetached(row.meta_pixel_id ?? null, decision.update.meta_pixel_id ?? null)) {
+    const { error: cancelError } = await supabase
+      .from("meta_event_deliveries")
+      .update({
+        status: "cancelled",
+        status_reason: "pixel_detached",
+        payload: null,
+        match_keys: [],
+        lease_owner: null,
+        lease_expires_at: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("tenant_id", tenantId)
+      .eq("funnel_id", funnelId)
+      .eq("pixel_id", row.meta_pixel_id as string)
+      .in("status", ["awaiting_consent", "held", "pending"]);
+    if (cancelError) {
+      // The send-time check still stops these rows; log and carry on.
+      console.error("[meta] cancel queued events after pixel change failed", cancelError.message);
+    }
   }
 }

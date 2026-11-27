@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { buildBrowserPixelBridgeSnippet } from "@/lib/embed/snippets";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
-import { countHeld, getLatestFailure } from "@/lib/meta/controls";
+import { countHeld, countQueued, getLatestFailure } from "@/lib/meta/controls";
 import { META_EVENT_DEFS, META_EVENT_KEYS } from "@/lib/meta/events";
 import { META_CONTROLS_COPY, eventKeyLabel, metaResponseText } from "@/lib/meta/log-format";
 import { getPixel, listFormsByPixel } from "@/lib/meta/pixels";
@@ -63,10 +63,14 @@ export default async function PixelSettingsPage({
   const pixel = await getPixel(tenantId, id).catch(() => null);
   if (!pixel) notFound();
 
-  const [formsByPixel, heldCount, latestFailure] = await Promise.all([
+  const [formsByPixel, heldCount, queuedCount, latestFailure] = await Promise.all([
     listFormsByPixel(tenantId),
     countHeld(tenantId, pixel.id).catch((error: unknown) => {
       console.error("[meta] held count failed", error instanceof Error ? error.message : "unknown error");
+      return 0;
+    }),
+    countQueued(tenantId, pixel.id).catch((error: unknown) => {
+      console.error("[meta] queued count failed", error instanceof Error ? error.message : "unknown error");
       return 0;
     }),
     getLatestFailure(tenantId, pixel.id).catch((error: unknown) => {
@@ -111,6 +115,16 @@ export default async function PixelSettingsPage({
 
       {actionError ? <ActionError message={actionError} /> : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
+      {pixel.test_event_code ? (
+        <p role="alert" className="max-w-3xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-900">
+          {META_CONTROLS_COPY.testCodeActive}
+        </p>
+      ) : null}
+      {queuedCount > 0 ? (
+        <p className="max-w-3xl rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+          {META_CONTROLS_COPY.queuedCount(queuedCount)}
+        </p>
+      ) : null}
 
       <Card className="max-w-3xl">
         <CardHeader>

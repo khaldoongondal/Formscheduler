@@ -129,3 +129,9 @@ export function resolveFunnelMetaUpdate(
     }
   };
 }
+
+/** True when a form had a pixel and the saved settings drop it or switch to another one. */
+export function pixelDetached(previousPixelId: string | null, nextPixelId: string | null): boolean {
+  return Boolean(previousPixelId) && previousPixelId !== nextPixelId;
+}
+

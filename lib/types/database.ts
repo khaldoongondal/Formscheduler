@@ -199,6 +199,12 @@ export interface LeadSession {
   /** Set when the tenant fired this lead's held Meta events (hold mode). */
   meta_released_at?: string | null;
   meta_released_by?: string | null;
+  /**
+   * Opaque reference for this lead's Meta event ids (migration 0027). It is
+   * posted to the embedding page, so it must never be the session id, which
+   * authorises the public lead APIs.
+   */
+  meta_event_ref?: string | null;
   started_at: string;
   qualified_at: string | null;
   slots_shown_at: string | null;
@@ -605,6 +611,10 @@ export interface Database {
       meta_match_key_coverage: {
         Args: { p_tenant_id: string; p_pixel_id: string; p_from: string; p_to: string };
         Returns: MetaMatchKeyCoverageRow[];
+      };
+      split_test_replace_members: {
+        Args: { p_tenant_id: string; p_test_id: string; p_funnel_ids: string[] };
+        Returns: undefined;
       };
     };
     Enums: {

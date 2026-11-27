@@ -9,6 +9,7 @@ import { getAdminTenantId } from "@/lib/auth/tenant";
 import { getTenantPlanState } from "@/lib/billing/plan-service";
 import { PLANS, SUSPENDED_MESSAGE, checkPixelLimit } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
+import { META_CONTROLS_COPY } from "@/lib/meta/log-format";
 import { listFormsByPixel, listPixels, type PixelSummary } from "@/lib/meta/pixels";
 
 export const dynamic = "force-dynamic";
@@ -87,6 +88,9 @@ export default async function PixelsPage({
                     <p className="text-xs text-slate-500">
                       {forms.length === 1 ? "Used by 1 form" : `Used by ${forms.length} forms`}
                     </p>
+                    {pixel.test_event_code ? (
+                      <p className="text-xs font-semibold text-amber-800">{META_CONTROLS_COPY.testCodeListBadge}</p>
+                    ) : null}
                   </div>
                   <Link
                     href={`/admin/pixels/${pixel.id}`}

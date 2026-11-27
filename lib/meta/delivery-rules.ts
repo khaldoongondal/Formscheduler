@@ -42,3 +42,34 @@ export const WORST_CASE_DELIVERY_MS = META_SEND_TIMEOUT_MS + 4000;
 export function shouldStopClaiming(startedMs: number, nowMs: number, budgetMs: number): boolean {
   return budgetMs - (nowMs - startedMs) <= WORST_CASE_DELIVERY_MS;
 }
+
+/** What the drain re-reads about a row's form at send time. */
+export type FunnelSendState = {
+  meta_pixel_id: string | null;
+  meta_consent_confirmed_at: string | null;
+  is_published: boolean;
+  taken_down_at: string | null;
+  tenant_plan: string | null;
+};
+
+/**
+ * True when a queued row may still go to Meta: its form exists for the same
+ * tenant, still uses the row's pixel with the customer's consent
+ * confirmation, is live and not taken down, and the tenant is not suspended.
+ * A form that changed or dropped its pixel stops every row it queued.
+ */
+export function funnelStillSends(
+  row: { pixel_id: string; funnel_id: string | null },
+  funnel: FunnelSendState | null
+): boolean {
+  if (!row.funnel_id || !funnel) return false;
+  if (!funnel.meta_pixel_id || funnel.meta_pixel_id !== row.pixel_id) return false;
+  if (!funnel.meta_consent_confirmed_at) return false;
+  if (funnel.is_published !== true || funnel.taken_down_at) return false;
+  if (!funnel.tenant_plan || funnel.tenant_plan === "suspended") return false;
+  return true;
+}
+
+/** Rows one cron run may claim; sends take a fraction of a second each. */
+export const CRON_DRAIN_ROW_LIMIT = 400;
+export const CRON_DRAIN_BATCH_SIZE = 20;

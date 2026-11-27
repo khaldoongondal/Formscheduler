@@ -189,24 +189,18 @@ function parseTestInput(input: unknown) {
   return { name: parsed.name, slug: slugCheck.slug, funnelIds: splitTestFormIds(parsed) };
 }
 
+/**
+ * Swaps a draft test's forms in one database transaction: the function locks
+ * the test row, refuses unless it is still a draft, then deletes and inserts.
+ */
 async function replaceMembers(tenantId: string, testId: string, funnelIds: string[]) {
   const supabase = createServiceClient();
-  const { error: deleteError } = await supabase
-    .from("split_test_members")
-    .delete()
-    .eq("tenant_id", tenantId)
-    .eq("test_id", testId);
-  if (deleteError) throw new Error(deleteError.message);
-
-  const { error: insertError } = await supabase.from("split_test_members").insert(
-    funnelIds.map((funnelId, index) => ({
-      test_id: testId,
-      funnel_id: funnelId,
-      tenant_id: tenantId,
-      position: index + 1
-    }))
-  );
-  if (insertError) throw new Error(insertError.message);
+  const { error } = await supabase.rpc("split_test_replace_members", {
+    p_tenant_id: tenantId,
+    p_test_id: testId,
+    p_funnel_ids: funnelIds
+  });
+  if (error) throw new Error(error.message);
 }
 
 /** Creates a draft test with its forms. Returns the new id. */
@@ -241,12 +235,16 @@ export async function updateSplitTestDraft(tenantId: string, testId: string, inp
     const parsed = parseTestInput(input);
     await assertFormsOwned(tenantId, parsed.funnelIds);
     const supabase = createServiceClient();
-    const { error } = await supabase
+    // Fails closed: a test that started since the check above is not touched.
+    const { data: updated, error } = await supabase
       .from("split_tests")
       .update({ name: parsed.name, slug: parsed.slug })
       .eq("tenant_id", tenantId)
-      .eq("id", testId);
+      .eq("id", testId)
+      .eq("status", "draft")
+      .select("id");
     if (error) throw new Error(error.message);
+    if (!updated?.length) throw new UserFacingError(SPLIT_TEST_MESSAGES.locked);
     await replaceMembers(tenantId, testId, parsed.funnelIds);
   });
 }

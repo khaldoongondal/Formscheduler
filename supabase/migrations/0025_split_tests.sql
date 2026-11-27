@@ -51,8 +51,9 @@ create index if not exists lead_sessions_split_test_idx
   on public.lead_sessions (split_test_id) where split_test_id is not null;
 
 -- Members: same tenant, at most 3, only while the test is a draft.
--- Deletes are not blocked here (a deleted form cascades); the app blocks
--- removing members from a test that is not a draft.
+-- Deletes are not blocked here (a deleted form cascades); the app swaps
+-- members only through split_test_replace_members, which locks the test and
+-- refuses unless it is a draft.
 create or replace function public.enforce_split_test_member_rules()
 returns trigger
 language plpgsql
@@ -176,11 +177,49 @@ create trigger split_tests_enforce_rules
 before insert or update on public.split_tests
 for each row execute function public.enforce_split_test_rules();
 
+-- Swaps the forms of a draft test in one transaction. The test row is locked
+-- first, so starting the test cannot slip in between the delete and the insert.
+create or replace function public.split_test_replace_members(
+  p_tenant_id uuid, p_test_id uuid, p_funnel_ids uuid[]
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_status text;
+begin
+  if p_tenant_id is null or p_test_id is null then
+    raise exception 'FORMBOOK_SPLIT:test_missing' using errcode = 'P0001';
+  end if;
+  select t.status into v_status from public.split_tests t
+  where t.id = p_test_id and t.tenant_id = p_tenant_id
+  for update;
+  if not found then
+    raise exception 'FORMBOOK_SPLIT:test_missing' using errcode = 'P0001';
+  end if;
+  if v_status <> 'draft' then
+    raise exception 'FORMBOOK_SPLIT:locked' using errcode = 'P0001';
+  end if;
+  if coalesce(array_length(p_funnel_ids, 1), 0) > 3 then
+    raise exception 'FORMBOOK_SPLIT:too_many_forms' using errcode = 'P0001';
+  end if;
+
+  delete from public.split_test_members m where m.test_id = p_test_id and m.tenant_id = p_tenant_id;
+
+  insert into public.split_test_members (test_id, funnel_id, tenant_id, position)
+  select p_test_id, f.funnel_id, p_tenant_id, f.ord::smallint
+  from unnest(coalesce(p_funnel_ids, '{}'::uuid[])) with ordinality as f(funnel_id, ord);
+end;
+$$;
+
 revoke all on table public.split_tests, public.split_test_members from anon, authenticated;
 grant select, insert, update, delete on table public.split_tests, public.split_test_members to service_role;
 revoke all on function public.enforce_split_test_member_rules() from public, anon, authenticated;
 revoke all on function public.enforce_split_test_rules() from public, anon, authenticated;
+revoke all on function public.split_test_replace_members(uuid, uuid, uuid[]) from public, anon, authenticated;
 grant execute on function public.enforce_split_test_member_rules() to service_role;
 grant execute on function public.enforce_split_test_rules() to service_role;
+grant execute on function public.split_test_replace_members(uuid, uuid, uuid[]) to service_role;
 
 notify pgrst, 'reload schema';

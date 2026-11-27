@@ -1,4 +1,11 @@
-import { classifyFailure, shouldStopClaiming } from "@/lib/meta/delivery-rules";
+import {
+  CRON_DRAIN_BATCH_SIZE,
+  CRON_DRAIN_ROW_LIMIT,
+  classifyFailure,
+  funnelStillSends,
+  shouldStopClaiming,
+  type FunnelSendState
+} from "@/lib/meta/delivery-rules";
 import { isEventEnabled, isMetaEventKey } from "@/lib/meta/events";
 import type { MetaServerEvent } from "@/lib/meta/payload";
 import { TokenUnreadableError, loadPixelSendConfig } from "@/lib/meta/pixels";
@@ -35,6 +42,8 @@ export type DeliverDeps = {
   now?: () => number;
   /** Reads the lead's consent answer; injectable for tests. */
   loadLeadConsent?: (leadSessionId: string, tenantId: string) => Promise<boolean | null>;
+  /** Reads the row's form and tenant state at send time; injectable for tests. */
+  loadFunnelState?: (funnelId: string, tenantId: string) => Promise<FunnelSendState | null>;
   settle?: (row: MetaEventDelivery, owner: string, args: SettleArgs) => Promise<boolean>;
   recordTestCode?: (row: MetaEventDelivery, owner: string, code: string | null) => Promise<void>;
 };
@@ -70,6 +79,32 @@ async function defaultLoadLeadConsent(leadSessionId: string, tenantId: string): 
   return (data as { meta_consent?: boolean | null } | null)?.meta_consent ?? null;
 }
 
+async function defaultLoadFunnelState(funnelId: string, tenantId: string): Promise<FunnelSendState | null> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("funnels")
+    .select("id,meta_pixel_id,meta_consent_confirmed_at,is_published,taken_down_at")
+    .eq("id", funnelId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const { data: tenant, error: tenantError } = await supabase
+    .from("tenants")
+    .select("plan")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (tenantError) throw new Error(tenantError.message);
+  const funnel = data as unknown as Partial<Omit<FunnelSendState, "tenant_plan">>;
+  return {
+    meta_pixel_id: funnel.meta_pixel_id ?? null,
+    meta_consent_confirmed_at: funnel.meta_consent_confirmed_at ?? null,
+    is_published: funnel.is_published === true,
+    taken_down_at: funnel.taken_down_at ?? null,
+    tenant_plan: (tenant as { plan?: string | null } | null)?.plan ?? null
+  };
+}
+
 async function defaultRecordTestCode(row: MetaEventDelivery, owner: string, code: string | null): Promise<void> {
   const supabase = createServiceClient();
   const { error } = await supabase
@@ -86,6 +121,7 @@ export async function deliverMetaRow(row: MetaEventDelivery, owner: string, deps
   const loadPixel = deps.loadPixel ?? loadPixelSendConfig;
   const settleRow = deps.settle ?? defaultSettle;
   const loadLeadConsent = deps.loadLeadConsent ?? defaultLoadLeadConsent;
+  const loadFunnelState = deps.loadFunnelState ?? defaultLoadFunnelState;
   const recordTestCode = deps.recordTestCode ?? defaultRecordTestCode;
 
   const settle = async (args: SettleArgs): Promise<DeliveryOutcome> => {
@@ -108,6 +144,14 @@ export async function deliverMetaRow(row: MetaEventDelivery, owner: string, deps
   }
   if (!pixel || pixel.tenantId !== row.tenant_id) {
     return settle({ outcome: "skipped", reason: "pixel_removed" });
+  }
+
+  // The form is re-read at send time: a form that dropped or changed its pixel,
+  // lost its consent confirmation, went offline, or whose tenant was suspended
+  // sends nothing it queued earlier.
+  const funnelState = row.funnel_id ? await loadFunnelState(row.funnel_id, row.tenant_id) : null;
+  if (!funnelStillSends(row, funnelState)) {
+    return settle({ outcome: "skipped", reason: "pixel_detached" });
   }
 
   // Switches are re-read at send time: an event switched off while it waited is not sent.
@@ -188,7 +232,11 @@ function emptyTally(): DrainTally {
   return { claimed: 0, sent: 0, retry: 0, failed: 0, skipped: 0, released: 0, deadlineHit: false };
 }
 
-/** The cron drain: claim small batches while time remains. */
+/**
+ * The cron drain: claim batches (oldest events first, see claim_meta_deliveries)
+ * until the time budget or the row cap is reached, so a large release clears
+ * in a few runs instead of trickling out.
+ */
 export async function drainMetaDeliveries(
   owner: string,
   opts: { budgetMs?: number; batchSize?: number; limit?: number; now?: () => number } = {}
@@ -196,8 +244,8 @@ export async function drainMetaDeliveries(
   const now = opts.now ?? Date.now;
   const started = now();
   const budgetMs = opts.budgetMs ?? 45000;
-  const batchSize = opts.batchSize ?? 4;
-  const maxRows = opts.limit ?? 25;
+  const batchSize = opts.batchSize ?? CRON_DRAIN_BATCH_SIZE;
+  const maxRows = opts.limit ?? CRON_DRAIN_ROW_LIMIT;
   const tally = emptyTally();
   const supabase = createServiceClient();
 

@@ -51,12 +51,17 @@ export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, { label: string; hel
   failed: { label: "Failed", help: "Meta did not accept it, or every retry failed. See the error.", tone: "red" },
   skipped: { label: "Skipped", help: "Not sent because of a setting at send time.", tone: "slate" },
   expired: { label: "Expired", help: "Older than Meta's 7-day limit, so it can no longer be sent.", tone: "slate" },
-  cancelled: { label: "Cancelled", help: "Not sent because the visitor did not give consent.", tone: "slate" }
+  cancelled: {
+    label: "Cancelled",
+    help: "Not sent because the visitor did not give consent, or the form stopped using this pixel.",
+    tone: "slate"
+  }
 };
 
 export const STATUS_REASON_LABELS: Record<string, string> = {
   event_off: "This event was switched off.",
   pixel_removed: "The pixel was removed.",
+  pixel_detached: "The form no longer sends to this pixel, or the form or account is not active.",
   consent_declined: "The visitor declined consent.",
   no_consent: "The visitor never answered the consent box.",
   token_unreadable: "The saved token could not be read.",
@@ -425,6 +430,12 @@ export const META_CONTROLS_COPY = {
   sendAllSaved: (n: number) =>
     `${n} held ${n === 1 ? "event is" : "events are"} on their way to Meta. Refresh in a minute to see the result.`,
   nothingHeld: "There are no held events to send.",
+  queuedCount: (n: number) =>
+    `${n} ${n === 1 ? "event is" : "events are"} waiting to go to Meta. They are sent oldest first, a few hundred every 5 minutes.`,
+  testCodeActive:
+    "A test event code is saved. Every event from this pixel is sent with it, so Meta shows the events only in the Test events tab and does not use them for your ads. Remove the code when you finish testing.",
+  testCodeListBadge: "Test code on: events do not count in Ads Manager",
+  sentWithTestCode: "Sent with a test event code",
   testTitle: "Test",
   sendTest: "Send test event",
   testNeedsCode: "Add a test event code above to send a test event.",
@@ -440,7 +451,7 @@ export const META_CONTROLS_COPY = {
   matchQuality: "Match quality",
   bridgeTitle: "Browser pixel bridge (optional)",
   bridgeHelp:
-    "If the page that shows your form also runs the Meta pixel, add this script to that page. It sends the same events from the browser with the same event IDs, so Meta counts each one once.",
+    "If the page that shows your form also runs the Meta pixel, add this script to that page. It sends the same events from the browser with the same event IDs, so Meta counts each one once. Events held for review are not passed to the browser, so hold mode still controls what Meta receives.",
   logHeading: "Event log",
   logSubheading: "Every event FormBook queued for this pixel, newest first.",
   logEmpty: "No events yet. Events appear here once a form that uses this pixel gets visits.",

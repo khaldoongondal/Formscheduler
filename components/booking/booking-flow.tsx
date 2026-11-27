@@ -14,6 +14,7 @@ import {
   adoptVisitorId,
   createPageLoadId,
   getVisitorId,
+  visitorCookieToWrite,
   writeVisitorCookie
 } from "@/lib/booking/visitor-id";
 import { FormFooter } from "@/components/booking/form-footer";
@@ -477,7 +478,11 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   useEffect(() => {
     const id = initialVisitorId ?? getVisitorId();
     if (initialVisitorId) adoptVisitorId(id);
-    if (splitTestId || initialVisitorId) writeVisitorCookie(id);
+    // Only an id the server used for assignment goes in the cookie. When the
+    // server bucketed by its IP and user agent key (initialVisitorId is null),
+    // a cookie with a throwaway id would move the visitor to another form.
+    const cookieId = visitorCookieToWrite(initialVisitorId);
+    if (cookieId) writeVisitorCookie(cookieId);
     removeSplitVisitorQuery();
     const trackingParams = getTrackingParams();
     setVisitorId(id);

@@ -4,6 +4,7 @@ import type { DeliveryListRow } from "@/lib/meta/controls";
 import {
   DELIVERY_STATUSES,
   DELIVERY_STATUS_LABELS,
+  META_CONTROLS_COPY,
   eventKeyLabel,
   isDeliveryStatus,
   matchKeyChips,
@@ -31,7 +32,15 @@ export function formatEventTime(value: string) {
   }).format(new Date(value));
 }
 
-export function DeliveryStatusBadge({ status, reason }: { status: string; reason: string | null }) {
+export function DeliveryStatusBadge({
+  status,
+  reason,
+  testCode = null
+}: {
+  status: string;
+  reason: string | null;
+  testCode?: string | null;
+}) {
   const tone = isDeliveryStatus(status) ? DELIVERY_STATUS_LABELS[status].tone : "slate";
   const reasonText = reasonLabel(reason);
   return (
@@ -40,6 +49,9 @@ export function DeliveryStatusBadge({ status, reason }: { status: string; reason
         {statusLabel(status)}
       </span>
       {reasonText ? <p className="text-xs leading-5 text-slate-500">{reasonText}</p> : null}
+      {status === "sent" && testCode ? (
+        <p className="text-xs font-semibold leading-5 text-amber-800">{META_CONTROLS_COPY.sentWithTestCode}</p>
+      ) : null}
     </div>
   );
 }
@@ -120,7 +132,7 @@ export function DeliveryTable({
                   <LeadCell row={row} />
                 </td>
                 <td className="px-3 py-3">
-                  <DeliveryStatusBadge status={row.status} reason={row.status_reason} />
+                  <DeliveryStatusBadge status={row.status} reason={row.status_reason} testCode={row.test_event_code_used} />
                 </td>
                 <td className="px-3 py-3">
                   <MatchChips keys={row.match_keys} />
@@ -149,7 +161,7 @@ export function DeliveryTable({
                   {row.event_name} | {formatEventTime(row.event_time)}
                 </p>
               </div>
-              <DeliveryStatusBadge status={row.status} reason={row.status_reason} />
+              <DeliveryStatusBadge status={row.status} reason={row.status_reason} testCode={row.test_event_code_used} />
             </div>
             <p className="text-xs text-slate-600">
               Form: {row.funnel_name ?? "None"} | Lead: <LeadCell row={row} /> | Attempts: {row.attempts}
