@@ -100,7 +100,9 @@ export const SPLIT_TEST_SAVED_MESSAGES: Record<string, string> = {
   saved: "Changes saved.",
   started: "Test started. Share the test link now.",
   ended: "Test ended.",
-  winner: "Winner saved."
+  winner: "Winner saved.",
+  spend: "Ad spend saved.",
+  "spend-cleared": "Ad spend cleared."
 };
 
 export const SPLIT_TEST_COPY = {

@@ -19,6 +19,8 @@ import {
   Settings
 } from "lucide-react";
 import {
+  addFormSpendAction,
+  deleteFormSpendAction,
   deleteFunnelAction,
   deleteQuestionAction,
   deleteQuestionOptionAction,
@@ -35,9 +37,15 @@ import {
   getFunnelAnalytics,
   resolveAnalyticsDateRange,
   type AnalyticsDateRange,
-  type FunnelDropOffStepRow,
+  type FunnelPerformanceRow,
   type SplitVariantPerformanceRow
 } from "@/lib/analytics/service";
+import { TOO_MUCH_DATA_MESSAGE } from "@/lib/supabase/paging";
+import { CURRENCIES, formatMoney, selectEntriesForRange } from "@/lib/spend/money";
+import { listFormSpend } from "@/lib/spend/service";
+import type { AdSpendEntry } from "@/lib/types/database";
+import { DateRangeFilter, formatDateInput } from "@/components/admin/date-range-filter";
+import { DropOffTable } from "@/components/admin/drop-off-table";
 import {
   analyticsCountryOptions,
   analyticsTrafficSourceOptions,
@@ -130,11 +138,24 @@ export default async function FunnelDetailPage({
     from: query.from,
     to: query.to
   });
-  const [connections, analytics, planSummary, runningTests] = await Promise.all([
+  const analyticsState: { error: string | null } = { error: null };
+  const [connections, analytics, planSummary, runningTests, spendEntries] = await Promise.all([
     listGhlConnections(funnel.tenant_id),
-    getFunnelAnalytics(funnel.id, analyticsRange),
+    getFunnelAnalytics(funnel.id, analyticsRange).catch((error: unknown): FunnelPerformanceRow | null => {
+      const message = error instanceof Error ? error.message : "";
+      // A failed analytics read must not block editing the form.
+      console.error("[analytics] form analytics failed", message);
+      analyticsState.error =
+        message === TOO_MUCH_DATA_MESSAGE ? TOO_MUCH_DATA_MESSAGE : "Analytics could not load. Refresh the page to try again.";
+      return null;
+    }),
     getTenantPlanSummary(funnel.tenant_id),
-    getRunningTestsByFunnel(funnel.tenant_id)
+    getRunningTestsByFunnel(funnel.tenant_id),
+    listFormSpend(funnel.tenant_id, funnel.id).catch((error: unknown): AdSpendEntry[] | null => {
+      // Null when the spend table is missing (migration 0026 not run yet).
+      console.error("[spend] form spend lookup failed", error instanceof Error ? error.message : "unknown error");
+      return null;
+    })
   ]);
   const runningTest = runningTests.get(funnel.id) ?? null;
   const activeLimitHint =
@@ -257,6 +278,11 @@ export default async function FunnelDetailPage({
             selectedCountryCodes={targetCountryCodes}
             selectedTrafficSources={targetTrafficSources}
           />
+          {analyticsState.error ? (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
+              {analyticsState.error}
+            </p>
+          ) : null}
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Metric
               label="Unique visitors"
@@ -279,10 +305,39 @@ export default async function FunnelDetailPage({
               helper="End-to-end conversion"
             />
           </section>
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric
+              label="Form starts"
+              value={analytics?.stageCounts.starts ?? 0}
+              helper="Started filling in the form"
+            />
+            <Metric
+              label="Qualified"
+              value={analytics?.stageCounts.qualified ?? 0}
+              helper="Answered every required question"
+            />
+            <Metric
+              label="Disqualified"
+              value={analytics?.stageCounts.disqualified ?? 0}
+              helper="Stopped by a disqualifying answer"
+            />
+            <Metric
+              label="Calendar shown"
+              value={analytics?.stageCounts.calendarShown ?? 0}
+              helper="Saw available times"
+            />
+          </section>
           <ConversionPath
             leadToBookedRate={analytics?.callBookingRate ?? 0}
             visitorToBookedRate={analytics?.visitorToBookedRate ?? 0}
             visitorToLeadRate={analytics?.optInRate ?? 0}
+          />
+          <FormSpendCard
+            funnelId={funnel.id}
+            entries={spendEntries}
+            range={analyticsRange}
+            leads={analytics?.optInCount ?? 0}
+            bookings={analytics?.callsBookedCount ?? 0}
           />
           <DropOffTable rows={analytics?.dropOffSteps ?? []} />
           <SplitTestPerformanceTable rows={analytics?.splitVariants ?? []} />
@@ -937,6 +992,10 @@ function actionSuccessMessage(saved?: string) {
       return "Intake flow saved.";
     case "analytics-filters":
       return "Analytics filters saved.";
+    case "spend":
+      return "Ad spend saved.";
+    case "spend-deleted":
+      return "Ad spend entry deleted.";
     default:
       return null;
   }
@@ -1003,40 +1062,6 @@ function AnalyticsControls({
         />
       </div>
     </section>
-  );
-}
-
-function DateRangeFilter({ range }: { range: AnalyticsDateRange }) {
-  return (
-    <form className="mt-3 grid gap-3 md:grid-cols-[190px_170px_170px_auto] md:items-end">
-      <div className="space-y-1.5">
-        <Label htmlFor="analytics-preset" className="text-xs text-slate-500">
-          Range
-        </Label>
-        <select id="analytics-preset" name="preset" className={inputClass} defaultValue={range.preset}>
-          <option value="today">Today</option>
-          <option value="yesterday">Yesterday</option>
-          <option value="last_7_days">Last 7 days</option>
-          <option value="last_30_days">Last 30 days</option>
-          <option value="custom">Custom</option>
-        </select>
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="analytics-from" className="text-xs text-slate-500">
-          From
-        </Label>
-        <Input id="analytics-from" name="from" type="date" defaultValue={formatDateInput(range.from)} />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="analytics-to" className="text-xs text-slate-500">
-          To
-        </Label>
-        <Input id="analytics-to" name="to" type="date" defaultValue={formatDateInput(range.to)} />
-      </div>
-      <Button type="submit" variant="outline" className="w-full md:w-auto">
-        Apply
-      </Button>
-    </form>
   );
 }
 
@@ -1123,13 +1148,6 @@ function AnalyticsFilterForm({
       </div>
     </form>
   );
-}
-
-function formatDateInput(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function ActionError({ message }: { message: string }) {
@@ -1534,61 +1552,151 @@ function SplitTestPerformanceTable({ rows }: { rows: SplitVariantPerformanceRow[
   );
 }
 
-function DropOffTable({ rows }: { rows: FunnelDropOffStepRow[] }) {
+function FormSpendCard({
+  bookings,
+  entries,
+  funnelId,
+  leads,
+  range
+}: {
+  bookings: number;
+  entries: AdSpendEntry[] | null;
+  funnelId: string;
+  leads: number;
+  range: AnalyticsDateRange;
+}) {
+  if (entries === null) {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <h3 className="text-sm font-semibold text-slate-950">Ad spend</h3>
+        <p className="mt-1 text-sm leading-6 text-slate-500">Ad spend is not available yet. Please try again later.</p>
+      </section>
+    );
+  }
+
+  const selection = selectEntriesForRange(
+    entries.map((entry) => ({
+      periodStart: entry.period_start ?? "",
+      periodEnd: entry.period_end ?? "",
+      amountCents: Number(entry.amount_cents),
+      currency: entry.currency
+    })),
+    formatDateInput(range.from),
+    formatDateInput(range.to)
+  );
+  const currencies = Object.keys(selection.totals);
+  const included = selection.included.length;
+  let summary: string;
+  if (currencies.length > 1) {
+    summary = "Entries use different currencies, so cost is not calculated.";
+  } else if (included === 0) {
+    summary = "No spend entered for this range.";
+  } else {
+    const currency = currencies[0];
+    const total = selection.totals[currency];
+    const costPerLead = leads > 0 ? formatMoney(Math.round(total / leads), currency) : "not available (no leads)";
+    const costPerBooking =
+      bookings > 0 ? formatMoney(Math.round(total / bookings), currency) : "not available (no booked calls)";
+    summary = `Spend in this range: ${formatMoney(total, currency)} from ${included} ${included === 1 ? "entry" : "entries"}. Cost per lead ${costPerLead}. Cost per booked call ${costPerBooking}.`;
+  }
+  const excluded = selection.excludedCount;
+  const excludedNote =
+    excluded > 0
+      ? excluded === 1
+        ? "1 entry that starts before or ends after this range is left out."
+        : `${excluded} entries that start before or end after this range are left out.`
+      : null;
+
   return (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-100 bg-slate-50/50 px-4 py-3">
-        <h3 className="text-sm font-semibold text-slate-950">Step drop-off</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-500">
-          Shows where unique visitors stop as they move through contact fields, questions, and calendar booking. Reached means viewed that step; advanced means moved past it.
-        </p>
+        <h3 className="text-sm font-semibold text-slate-950">Ad spend</h3>
+        <p className="mt-1 text-sm leading-6 text-slate-700">{summary}</p>
+        {excludedNote ? <p className="mt-1 text-sm leading-6 text-slate-500">{excludedNote}</p> : null}
       </div>
-      {rows.length > 0 ? (
+      {entries.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 font-semibold">Step</th>
-                <th className="px-4 py-3 font-semibold">Type</th>
-                <th className="px-4 py-3 text-right font-semibold">Reached</th>
-                <th className="px-4 py-3 text-right font-semibold">Advanced</th>
-                <th className="px-4 py-3 text-right font-semibold">Dropped</th>
-                <th className="px-4 py-3 text-right font-semibold">Drop-off rate</th>
+                <th className="px-4 py-3 font-semibold">Period</th>
+                <th className="px-4 py-3 text-right font-semibold">Amount</th>
+                <th className="px-4 py-3 font-semibold">Note</th>
+                <th className="px-4 py-3">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.stepKey} className="border-t border-slate-100">
-                  <td className="max-w-md px-4 py-3">
-                    <span className="block font-semibold text-slate-950">{row.stepLabel}</span>
+              {entries.map((entry) => (
+                <tr key={entry.id} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-4 py-3 text-slate-800">
+                    {entry.period_start} to {entry.period_end}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{formatStepType(row.stepType)}</td>
-                  <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-800">{row.uniqueVisitors}</td>
-                  <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-800">{row.continuedCount}</td>
-                  <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-800">{row.dropOffCount}</td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-950">{formatRate(row.dropOffRate)}</td>
+                  <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-800">
+                    {formatMoney(Number(entry.amount_cents), entry.currency)}
+                  </td>
+                  <td className="max-w-xs break-words px-4 py-3 text-slate-600">{entry.note ?? ""}</td>
+                  <td className="px-4 py-3 text-right">
+                    <form action={deleteFormSpendAction}>
+                      <input type="hidden" name="id" value={funnelId} />
+                      <input type="hidden" name="entry_id" value={entry.id} />
+                      <Button type="submit" variant="outline" size="sm">
+                        Delete
+                      </Button>
+                    </form>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ) : (
-        <p className="px-4 py-5 text-sm leading-6 text-slate-500">
-          No step-level tracking yet. This will start filling after the latest public form update is deployed and visitors move through the funnel.
-        </p>
-      )}
+      ) : null}
+      <form
+        action={addFormSpendAction}
+        className="grid gap-3 border-t border-slate-100 p-4 sm:grid-cols-2 lg:grid-cols-[150px_150px_140px_110px_minmax(140px,1fr)_auto] lg:items-end"
+      >
+        <input type="hidden" name="id" value={funnelId} />
+        <div className="space-y-1.5">
+          <Label htmlFor="spend-start" className="text-xs text-slate-500">
+            Start date
+          </Label>
+          <Input id="spend-start" name="period_start" type="date" required />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="spend-end" className="text-xs text-slate-500">
+            End date
+          </Label>
+          <Input id="spend-end" name="period_end" type="date" required />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="spend-amount" className="text-xs text-slate-500">
+            Amount
+          </Label>
+          <Input id="spend-amount" name="amount" inputMode="decimal" placeholder="1250.00" required />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="spend-currency" className="text-xs text-slate-500">
+            Currency
+          </Label>
+          <select id="spend-currency" name="currency" className={inputClass} defaultValue="USD">
+            {CURRENCIES.map((currency) => (
+              <option key={currency} value={currency}>
+                {currency}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="spend-note" className="text-xs text-slate-500">
+            Note (optional)
+          </Label>
+          <Input id="spend-note" name="note" maxLength={200} />
+        </div>
+        <SaveSubmitButton label="Add spend" variant="outline" />
+      </form>
     </section>
   );
-}
-
-function formatStepType(type: FunnelDropOffStepRow["stepType"]) {
-  const labels: Record<FunnelDropOffStepRow["stepType"], string> = {
-    page_view: "Page",
-    contact: "Contact",
-    question: "Question",
-    calendar: "Calendar"
-  };
-  return labels[type];
 }
 
 function SummaryRow({ label, value }: { label: string; value: string }) {

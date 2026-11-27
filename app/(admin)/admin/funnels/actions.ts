@@ -22,6 +22,7 @@ import {
   type QuestionDisqualificationOperator
 } from "@/lib/funnels/disqualification";
 import { assertOptionInFunnel, assertQuestionInFunnel } from "@/lib/funnels/question-scope";
+import { addFormSpend, deleteFormSpend } from "@/lib/spend/service";
 import type { QuestionType } from "@/lib/types/database";
 import {
   createFunnel,
@@ -337,6 +338,45 @@ export async function updateAnalyticsTargetCountriesAction(formData: FormData) {
 
   revalidatePath(`/admin/funnels/${id}`);
   redirect(`/admin/funnels/${id}?saved=analytics-filters#performance`);
+}
+
+function spendErrorRedirect(funnelId: string, error: unknown): never {
+  const message = error instanceof Error && error.message ? error.message : "Something went wrong. Please try again.";
+  redirect(`/admin/funnels/${funnelId}?error=${encodeURIComponent(message)}#performance`);
+}
+
+export async function addFormSpendAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const { tenantId } = await assertAdminFunnel(id);
+
+  try {
+    await addFormSpend(tenantId, id, {
+      amount: trimmedString(formData, "amount"),
+      currency: trimmedString(formData, "currency"),
+      period_start: trimmedString(formData, "period_start"),
+      period_end: trimmedString(formData, "period_end"),
+      note: trimmedString(formData, "note")
+    });
+  } catch (error) {
+    spendErrorRedirect(id, error);
+  }
+
+  revalidatePath(`/admin/funnels/${id}`);
+  redirect(`/admin/funnels/${id}?saved=spend#performance`);
+}
+
+export async function deleteFormSpendAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const { tenantId } = await assertAdminFunnel(id);
+
+  try {
+    await deleteFormSpend(tenantId, trimmedString(formData, "entry_id"));
+  } catch (error) {
+    spendErrorRedirect(id, error);
+  }
+
+  revalidatePath(`/admin/funnels/${id}`);
+  redirect(`/admin/funnels/${id}?saved=spend-deleted#performance`);
 }
 
 export async function moveContactFieldAction(formData: FormData) {

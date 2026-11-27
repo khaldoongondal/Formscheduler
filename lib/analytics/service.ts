@@ -6,13 +6,27 @@ import {
   resolveAnalyticsTrafficSources
 } from "@/lib/analytics/country-filter";
 import {
-  contactFieldOptions,
-  resolveContactFieldConfig,
-  resolveIntakeFlowOrder,
-  type ContactFieldKey
-} from "@/lib/funnels/contact-fields";
+  buildDropOffRows,
+  computeStageCounts,
+  rate,
+  unionSets,
+  visitorIdentity,
+  type FunnelDropOffStepRow,
+  type StageCounts,
+  type VisitorEventRow
+} from "@/lib/analytics/funnel-math";
+import { chunk, mapInBatches, selectAllPages } from "@/lib/supabase/paging";
 import { createServiceClient } from "@/lib/supabase/server";
-import type { AnalyticsEvent, AnalyticsEventType, Funnel, Json, Question } from "@/lib/types/database";
+import type {
+  AnalyticsEvent,
+  AnalyticsEventType,
+  Json,
+  LeadSession,
+  LeadStatusHistory,
+  Question
+} from "@/lib/types/database";
+
+export type { FunnelDropOffStepRow, StageCounts } from "@/lib/analytics/funnel-math";
 
 export type AnalyticsPreset = "today" | "yesterday" | "last_7_days" | "last_30_days" | "custom";
 
@@ -50,6 +64,8 @@ export interface FunnelPerformanceRow {
   targetTrafficSources: string[];
   splitVariants: SplitVariantPerformanceRow[];
   dropOffSteps: FunnelDropOffStepRow[];
+  /** Funnel stages per distinct visitor (Sprint 2): starts, qualified, disqualified, calendar shown. */
+  stageCounts: StageCounts;
 }
 
 export interface SplitVariantPerformanceRow {
@@ -61,22 +77,6 @@ export interface SplitVariantPerformanceRow {
   callsBookedCount: number;
   callBookingRate: number;
   visitorToBookedRate: number;
-}
-
-export interface FunnelDropOffStepRow {
-  stepKey: string;
-  stepLabel: string;
-  stepType: "page_view" | "contact" | "question" | "calendar";
-  uniqueVisitors: number;
-  continuedCount: number;
-  dropOffCount: number;
-  dropOffRate: number;
-}
-
-interface AnalyticsFlowStep {
-  stepKey: string;
-  stepLabel: string;
-  stepType: FunnelDropOffStepRow["stepType"];
 }
 
 function startOfDay(date: Date) {
@@ -124,13 +124,8 @@ export function resolveAnalyticsDateRange(input?: {
   return { preset: "last_7_days", from, to: endOfDay(now) };
 }
 
-function percentage(numerator: number, denominator: number) {
-  return denominator > 0 ? numerator / denominator : 0;
-}
-
-function getVisitorIdentity(input: { id: string; visitor_id?: string | null }) {
-  return input.visitor_id ?? input.id;
-}
+const percentage = rate;
+const getVisitorIdentity = visitorIdentity;
 
 function isJsonRecord(value: Json): value is { [key: string]: Json | undefined } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -163,160 +158,6 @@ function getSplitIdentityOrUntagged(metadata: Json) {
       splitVariant: "untagged"
     }
   );
-}
-
-function getContactFieldLabel(fieldKey: ContactFieldKey) {
-  return contactFieldOptions.find((field) => field.key === fieldKey)?.label ?? fieldKey.replace("_", " ");
-}
-
-function buildAnalyticsFlowSteps(
-  funnel: Pick<Funnel, "qualification_rule">,
-  questions: Array<Pick<Question, "id" | "label">>
-): AnalyticsFlowStep[] {
-  const contactFieldConfig = resolveContactFieldConfig(funnel.qualification_rule);
-  const questionsById = new Map(questions.map((question) => [question.id, question]));
-  const questionIds = questions.map((question) => question.id);
-  const flowItems = resolveIntakeFlowOrder(funnel.qualification_rule, questionIds);
-  const steps: AnalyticsFlowStep[] = [];
-  const pendingContactFields: ContactFieldKey[] = [];
-
-  const flushContactFields = () => {
-    while (pendingContactFields.length) {
-      const fields = pendingContactFields.splice(0, contactFieldConfig.fieldsPerPage);
-      steps.push({
-        stepKey: `contact:${steps.length + 1}:${fields.join(",")}`,
-        stepLabel: `Contact: ${fields.map(getContactFieldLabel).join(" + ")}`,
-        stepType: "contact"
-      });
-    }
-  };
-
-  for (const item of flowItems) {
-    if (item.type === "contact") {
-      if (contactFieldConfig.settings[item.key]) {
-        pendingContactFields.push(item.key);
-      }
-      continue;
-    }
-
-    flushContactFields();
-    const question = questionsById.get(item.id);
-    if (question) {
-      steps.push({
-        stepKey: `question:${question.id}`,
-        stepLabel: question.label,
-        stepType: "question"
-      });
-    }
-  }
-
-  flushContactFields();
-  return steps;
-}
-
-function getEventStepKey(event: Pick<AnalyticsEvent, "metadata">) {
-  return getMetadataString(event.metadata, "step_key");
-}
-
-function addToSetMap(map: Map<string, Set<string>>, key: string, value: string) {
-  const existing = map.get(key);
-  if (existing) {
-    existing.add(value);
-    return;
-  }
-
-  map.set(key, new Set([value]));
-}
-
-function unionSets(...sets: Array<Set<string> | undefined>) {
-  const union = new Set<string>();
-  sets.forEach((set) => {
-    set?.forEach((value) => union.add(value));
-  });
-  return union;
-}
-
-function intersectSize(left: Set<string>, right: Set<string>) {
-  let count = 0;
-  left.forEach((value) => {
-    if (right.has(value)) count += 1;
-  });
-  return count;
-}
-
-function getEventVisitorIds(events: AnalyticsEvent[], eventType?: AnalyticsEventType) {
-  return new Set(
-    events
-      .filter((event) => !eventType || event.event_type === eventType)
-      .map((event) => getVisitorIdentity(event))
-  );
-}
-
-function buildDropOffRows(input: {
-  bookedVisitorIds: Set<string>;
-  disqualifiedVisitorIds: Set<string>;
-  events: AnalyticsEvent[];
-  funnel: Pick<Funnel, "qualification_rule">;
-  pageViewVisitorIds: Set<string>;
-  questions: Array<Pick<Question, "id" | "label">>;
-  slotsShownVisitorIds: Set<string>;
-}) {
-  const stepViewEvents = input.events.filter((event) => event.event_type === "step_view");
-  if (!stepViewEvents.length) return [];
-
-  const visitorsByStepKey = new Map<string, Set<string>>();
-  stepViewEvents.forEach((event) => {
-    const stepKey = getEventStepKey(event);
-    if (!stepKey) return;
-    addToSetMap(visitorsByStepKey, stepKey, getVisitorIdentity(event));
-  });
-
-  const intakeSteps = buildAnalyticsFlowSteps(input.funnel, input.questions);
-  const calendarStep: AnalyticsFlowStep = {
-    stepKey: "slots",
-    stepLabel: "Calendar availability",
-    stepType: "calendar"
-  };
-  const steps: AnalyticsFlowStep[] = [
-    { stepKey: "page_view", stepLabel: "Page loaded", stepType: "page_view" },
-    ...intakeSteps,
-    calendarStep
-  ];
-  const rawVisitorsByStep = steps.map((step) => {
-    if (step.stepType === "page_view") return input.pageViewVisitorIds;
-    if (step.stepType === "calendar") {
-      return unionSets(visitorsByStepKey.get(step.stepKey), input.slotsShownVisitorIds, input.bookedVisitorIds);
-    }
-
-    return visitorsByStepKey.get(step.stepKey) ?? new Set<string>();
-  });
-  const enteredByStep: Set<string>[] = [];
-
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    enteredByStep[index] = unionSets(rawVisitorsByStep[index], enteredByStep[index + 1]);
-  }
-
-  return steps
-    .map((step, index): FunnelDropOffStepRow => {
-      const entered = enteredByStep[index] ?? new Set<string>();
-      const continuedVisitors =
-        step.stepType === "calendar"
-          ? input.bookedVisitorIds
-          : unionSets(enteredByStep[index + 1], input.disqualifiedVisitorIds);
-      const continuedCount = intersectSize(entered, continuedVisitors);
-      const dropOffCount = Math.max(entered.size - continuedCount, 0);
-
-      return {
-        stepKey: step.stepKey,
-        stepLabel: step.stepLabel,
-        stepType: step.stepType,
-        uniqueVisitors: entered.size,
-        continuedCount,
-        dropOffCount,
-        dropOffRate: percentage(dropOffCount, entered.size)
-      };
-    })
-    .filter((row) => row.uniqueVisitors > 0 || row.stepType !== "page_view");
 }
 
 type SplitAggregation = SplitVariantPerformanceRow & {
@@ -397,39 +238,86 @@ function isMissingColumnError(error: { code?: string; message?: string }) {
   return error.code === "42703" || error.code === "PGRST204" || /split_test_id/.test(error.message ?? "");
 }
 
-export async function getFunnelPerformance(tenantId: string, range: AnalyticsDateRange) {
+function getEventVisitorIds(events: AnalyticsEvent[], eventType?: AnalyticsEventType) {
+  return new Set(
+    events
+      .filter((event) => !eventType || event.event_type === eventType)
+      .map((event) => getVisitorIdentity(event))
+  );
+}
+
+function stepEventsFor(events: AnalyticsEvent[]): VisitorEventRow[] {
+  return events.map((event) => ({
+    id: event.id,
+    visitor_id: event.visitor_id,
+    funnel_id: event.funnel_id,
+    event_type: event.event_type,
+    step_key: getMetadataString(event.metadata, "step_key")
+  }));
+}
+
+const PERFORMANCE_HISTORY_STATUSES = ["potential", "qualified", "slots_shown", "booked", "disqualified"] as const;
+const SESSION_ID_CHUNK = 200;
+
+/**
+ * Per-form analytics for a date range. Every query is paged (PostgREST returns
+ * at most 1000 rows per request) and lead sessions are loaded only when a
+ * history row in range points at them. Pass `funnelId` to load one form.
+ */
+export async function getFunnelPerformance(
+  tenantId: string,
+  range: AnalyticsDateRange,
+  opts?: { funnelId?: string }
+) {
   noStore();
   const supabase = createServiceClient();
-  const [funnelsResult, eventsResult, historyResult, sessionsResult, questionsResult] = await Promise.all([
-    supabase.from("funnels").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }),
-    supabase
-      .from("analytics_events")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .gte("occurred_at", range.from.toISOString())
-      .lte("occurred_at", range.to.toISOString()),
-    supabase
-      .from("lead_status_history")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .in("to_status", ["potential", "slots_shown", "booked", "disqualified"])
-      .gte("created_at", range.from.toISOString())
-      .lte("created_at", range.to.toISOString()),
-    supabase.from("lead_sessions").select("*").eq("tenant_id", tenantId),
-    supabase
-      .from("questions")
-      .select("id,funnel_id,label,display_order")
-      .eq("tenant_id", tenantId)
-      .order("display_order", { ascending: true })
+  const funnelId = opts?.funnelId;
+  const fromIso = range.from.toISOString();
+  const toIso = range.to.toISOString();
+
+  const funnelsQuery = supabase.from("funnels").select("*").eq("tenant_id", tenantId);
+  const questionsQuery = supabase
+    .from("questions")
+    .select("id,funnel_id,label,display_order")
+    .eq("tenant_id", tenantId);
+  const [funnelsResult, questionsResult, events, history] = await Promise.all([
+    (funnelId ? funnelsQuery.eq("id", funnelId) : funnelsQuery).order("created_at", { ascending: false }),
+    (funnelId ? questionsQuery.eq("funnel_id", funnelId) : questionsQuery).order("display_order", { ascending: true }),
+    selectAllPages<AnalyticsEvent>((from, to) => {
+      const query = supabase
+        .from("analytics_events")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .gte("occurred_at", fromIso)
+        .lte("occurred_at", toIso);
+      return (funnelId ? query.eq("funnel_id", funnelId) : query).order("id", { ascending: true }).range(from, to);
+    }),
+    selectAllPages<LeadStatusHistory>((from, to) =>
+      supabase
+        .from("lead_status_history")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .in("to_status", [...PERFORMANCE_HISTORY_STATUSES])
+        .gte("created_at", fromIso)
+        .lte("created_at", toIso)
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
   ]);
 
   if (funnelsResult.error) throw new Error(funnelsResult.error.message);
-  if (eventsResult.error) throw new Error(eventsResult.error.message);
-  if (historyResult.error) throw new Error(historyResult.error.message);
-  if (sessionsResult.error) throw new Error(sessionsResult.error.message);
   if (questionsResult.error) throw new Error(questionsResult.error.message);
 
-  const sessionById = new Map(sessionsResult.data.map((session) => [session.id, session]));
+  const sessionIds = [...new Set(history.map((row) => row.lead_session_id))];
+  const sessionChunks = await mapInBatches(chunk(sessionIds, SESSION_ID_CHUNK), 5, (ids) =>
+    selectAllPages<LeadSession>((from, to) => {
+      const query = supabase.from("lead_sessions").select("*").eq("tenant_id", tenantId).in("id", ids);
+      return (funnelId ? query.eq("funnel_id", funnelId) : query).order("id", { ascending: true }).range(from, to);
+    })
+  );
+  const sessions = sessionChunks.flat();
+
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const questionsByFunnelId = new Map<string, Array<Pick<Question, "id" | "label">>>();
   questionsResult.data.forEach((question) => {
     const questions = questionsByFunnelId.get(question.funnel_id) ?? [];
@@ -440,25 +328,25 @@ export async function getFunnelPerformance(tenantId: string, range: AnalyticsDat
   return funnelsResult.data.map((funnel): FunnelPerformanceRow => {
     const targetCountryCodes = resolveAnalyticsTargetCountryCodes(funnel.qualification_rule);
     const targetTrafficSources = resolveAnalyticsTrafficSources(funnel.qualification_rule);
-    const events = eventsResult.data.filter(
+    const funnelEvents = events.filter(
       (event) =>
         event.funnel_id === funnel.id &&
         matchesAnalyticsTargetCountries(event.metadata, targetCountryCodes) &&
         matchesAnalyticsTrafficSources(event.metadata, targetTrafficSources, {
           source_url: event.source_url
         })
-    ) as AnalyticsEvent[];
-    const pageViewVisitorIds = getEventVisitorIds(events, "page_view");
-    const stepViewVisitorIds = getEventVisitorIds(events, "step_view");
+    );
+    const pageViewVisitorIds = getEventVisitorIds(funnelEvents, "page_view");
+    const stepViewVisitorIds = getEventVisitorIds(funnelEvents, "step_view");
     const splitRowsByKey = new Map<string, SplitAggregation>();
 
-    events.forEach((event) => {
+    funnelEvents.forEach((event) => {
       const split = getSplitIdentityOrUntagged(event.metadata);
       const splitRow = getSplitAggregation(splitRowsByKey, split);
       splitRow.visitorIds.add(getVisitorIdentity(event));
     });
 
-    const funnelHistory = historyResult.data.filter((history) => {
+    const stageHistory = history.filter((history) => {
       const session = sessionById.get(history.lead_session_id);
       return (
         session?.funnel_id === funnel.id &&
@@ -466,6 +354,17 @@ export async function getFunnelPerformance(tenantId: string, range: AnalyticsDat
         matchesAnalyticsTrafficSources(session.metadata, targetTrafficSources, session)
       );
     });
+    const stageSessionIds = new Set(stageHistory.map((history) => history.lead_session_id));
+    const stageCounts = computeStageCounts(
+      stepEventsFor(funnelEvents),
+      sessions
+        .filter((session) => stageSessionIds.has(session.id))
+        .map((session) => ({ id: session.id, visitor_id: session.visitor_id, funnel_id: session.funnel_id })),
+      stageHistory
+    );
+    // "qualified" rows feed only the stage counts; every older figure uses the
+    // same statuses as before, so its values do not change.
+    const funnelHistory = stageHistory.filter((history) => history.to_status !== "qualified");
     const optInVisitorIds = new Set(
       funnelHistory
         .filter((history) => history.to_status === "potential")
@@ -502,15 +401,15 @@ export async function getFunnelPerformance(tenantId: string, range: AnalyticsDat
       const split = getSplitIdentityOrUntagged(session.metadata);
 
       const splitRow = getSplitAggregation(splitRowsByKey, split);
-      const visitorIdentity = getVisitorIdentity(session);
-      splitRow.visitorIds.add(visitorIdentity);
+      const identity = getVisitorIdentity(session);
+      splitRow.visitorIds.add(identity);
 
       if (history.to_status === "potential") {
-        splitRow.optInVisitorIds.add(visitorIdentity);
+        splitRow.optInVisitorIds.add(identity);
       }
 
       if (history.to_status === "booked") {
-        splitRow.bookedVisitorIds.add(visitorIdentity);
+        splitRow.bookedVisitorIds.add(identity);
       }
     });
 
@@ -541,7 +440,7 @@ export async function getFunnelPerformance(tenantId: string, range: AnalyticsDat
     const dropOffSteps = buildDropOffRows({
       bookedVisitorIds,
       disqualifiedVisitorIds,
-      events,
+      events: stepEventsFor(funnelEvents),
       funnel,
       pageViewVisitorIds: funnelVisitorIds,
       questions: questionsByFunnelId.get(funnel.id) ?? [],
@@ -561,7 +460,16 @@ export async function getFunnelPerformance(tenantId: string, range: AnalyticsDat
       targetCountryCodes,
       targetTrafficSources,
       splitVariants,
-      dropOffSteps
+      dropOffSteps,
+      stageCounts: {
+        visitors: stageCounts.visitors,
+        starts: stageCounts.starts,
+        leads: stageCounts.leads,
+        qualified: stageCounts.qualified,
+        disqualified: stageCounts.disqualified,
+        calendarShown: stageCounts.calendarShown,
+        bookings: stageCounts.bookings
+      }
     };
   });
 }
@@ -570,11 +478,11 @@ export async function getFunnelAnalytics(funnelId: string, range = resolveAnalyt
   const supabase = createServiceClient();
   const { data: funnel, error: funnelError } = await supabase
     .from("funnels")
-    .select("*")
+    .select("id,tenant_id")
     .eq("id", funnelId)
     .single();
   if (funnelError) throw new Error(funnelError.message);
 
-  const rows = await getFunnelPerformance(funnel.tenant_id, range);
+  const rows = await getFunnelPerformance(funnel.tenant_id, range, { funnelId });
   return rows.find((row) => row.funnelId === funnelId) ?? null;
 }

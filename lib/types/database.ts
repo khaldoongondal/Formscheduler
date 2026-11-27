@@ -281,6 +281,21 @@ export interface SplitTestMember {
   created_at: string;
 }
 
+export interface AdSpendEntry {
+  id: string;
+  tenant_id: string;
+  funnel_id: string;
+  /** Set for split test spend (covers the whole test); null for single-form spend. */
+  split_test_id: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  amount_cents: number;
+  currency: "USD" | "CAD" | "EUR" | "GBP" | "AUD";
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PlanLimitsRow {
   plan: "free" | "scaling" | "suspended";
   display_name: string;
@@ -386,6 +401,7 @@ export interface Database {
       owner_audit_log: Table<OwnerAuditLog>;
       split_tests: Table<SplitTest>;
       split_test_members: Table<SplitTestMember>;
+      ad_spend_entries: Table<AdSpendEntry>;
     };
     Views: Record<string, never>;
     Functions: {

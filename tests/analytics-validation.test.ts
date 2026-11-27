@@ -35,6 +35,17 @@ describe("analyticsEventSchema", () => {
     assert.equal(analyticsEventSchema.safeParse(realPayload()).success, true);
   });
 
+  it("accepts a form_start event", () => {
+    assert.equal(analyticsEventSchema.safeParse({ ...realPayload(), event_type: "form_start" }).success, true);
+  });
+
+  it("accepts a uuid test id", () => {
+    assert.equal(
+      analyticsEventSchema.safeParse({ ...realPayload(), test_id: "33333333-3333-4333-8333-333333333333" }).success,
+      true
+    );
+  });
+
   it("accepts undefined tracking params from the client", () => {
     const payload = realPayload();
     const withUndefined = { ...payload, metadata: { ...payload.metadata, gclid: undefined } };

@@ -37,6 +37,12 @@ import {
   unavailableMemberWarning
 } from "@/lib/split-tests/rules";
 import { getRunningTestsByFunnel, getSplitTest, type SplitTestWithMembers } from "@/lib/split-tests/service";
+import { getSplitTestResults, splitTestPeriod, type SplitTestResults } from "@/lib/split-tests/results-service";
+import { resolveAnalyticsDateRange } from "@/lib/analytics/service";
+import { listTestSpend } from "@/lib/spend/service";
+import { TOO_MUCH_DATA_MESSAGE } from "@/lib/supabase/paging";
+import type { AdSpendEntry } from "@/lib/types/database";
+import { SplitResultsCard, TestSpendCard, RESULTS_COPY } from "@/app/(admin)/admin/split-tests/[id]/results-section";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +51,7 @@ export default async function SplitTestDetailPage({
   searchParams
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ error?: string; saved?: string }>;
+  searchParams?: Promise<{ error?: string; saved?: string; preset?: string; from?: string; to?: string }>;
 }) {
   const { id } = await params;
   const missingEnv = getMissingSupabaseAdminEnv();
@@ -74,6 +80,40 @@ export default async function SplitTestDetailPage({
   const unavailable = members.filter((member) => !member.isPublished || member.takenDown);
   const noneAvailable = members.length > 0 && unavailable.length === members.length;
 
+  // Results: the whole test by default, or a preset or custom range.
+  const period = splitTestPeriod(test);
+  const range =
+    !period
+      ? null
+      : !query.preset || query.preset === "test"
+        ? { from: period.from, to: period.to, preset: "test" }
+        : resolveAnalyticsDateRange({ preset: query.preset, from: query.from, to: query.to });
+  let results: SplitTestResults | null = null;
+  let resultsError: string | null = null;
+  let savedSpend: Map<string, AdSpendEntry> | null = null;
+  if (isLive && range) {
+    const [resultsOutcome, spendOutcome] = await Promise.allSettled([
+      getSplitTestResults(tenantId, test.id, range),
+      listTestSpend(tenantId, test.id)
+    ]);
+    if (resultsOutcome.status === "fulfilled") {
+      results = resultsOutcome.value;
+    } else {
+      const message = resultsOutcome.reason instanceof Error ? resultsOutcome.reason.message : "";
+      console.error("[split-tests] results failed", message);
+      resultsError =
+        message === TOO_MUCH_DATA_MESSAGE ? TOO_MUCH_DATA_MESSAGE : "Results could not load. Refresh the page to try again.";
+    }
+    if (spendOutcome.status === "fulfilled") {
+      savedSpend = spendOutcome.value;
+    } else {
+      console.error(
+        "[spend] test spend lookup failed",
+        spendOutcome.reason instanceof Error ? spendOutcome.reason.message : "unknown error"
+      );
+    }
+  }
+
   return (
     <div className="space-y-8">
       <div>
@@ -101,6 +141,23 @@ export default async function SplitTestDetailPage({
       {isLive && !noneAvailable
         ? unavailable.map((member) => <Warning key={member.funnelId} message={unavailableMemberWarning(member.name)} />)
         : null}
+
+      {!isLive ? (
+        <p className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">{RESULTS_COPY.draft}</p>
+      ) : null}
+      {resultsError ? <Warning message={resultsError} /> : null}
+      {results && range ? <SplitResultsCard results={results} range={range} /> : null}
+      {isLive ? (
+        <TestSpendCard
+          testId={test.id}
+          arms={members.map((member) => ({
+            funnelId: member.funnelId,
+            label: splitArmLabel(member.position),
+            name: member.name
+          }))}
+          saved={savedSpend}
+        />
+      ) : null}
 
       <Card>
         <CardHeader>

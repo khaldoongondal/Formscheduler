@@ -12,6 +12,7 @@ import {
   startSplitTest,
   updateSplitTestDraft
 } from "@/lib/split-tests/service";
+import { clearTestSpend, upsertTestSpend } from "@/lib/spend/service";
 
 const LIST_PATH = "/admin/split-tests";
 
@@ -136,4 +137,32 @@ export async function deleteSplitTestAction(formData: FormData) {
   }
   revalidatePath(LIST_PATH);
   redirect(`${LIST_PATH}?saved=deleted`);
+}
+
+export async function saveTestSpendAction(formData: FormData) {
+  const testId = field(formData, "id");
+  try {
+    const tenantId = await adminTenantId();
+    await upsertTestSpend(tenantId, testId, field(formData, "funnel_id"), {
+      amount: field(formData, "amount"),
+      currency: field(formData, "currency"),
+      note: field(formData, "note")
+    });
+  } catch (error) {
+    redirect(`${detailPath(testId)}?error=${encodeURIComponent(errorMessage(error))}#ad-spend`);
+  }
+  revalidatePath(detailPath(testId));
+  redirect(`${detailPath(testId)}?saved=spend#ad-spend`);
+}
+
+export async function clearTestSpendAction(formData: FormData) {
+  const testId = field(formData, "id");
+  try {
+    const tenantId = await adminTenantId();
+    await clearTestSpend(tenantId, testId, field(formData, "funnel_id"));
+  } catch (error) {
+    redirect(`${detailPath(testId)}?error=${encodeURIComponent(errorMessage(error))}#ad-spend`);
+  }
+  revalidatePath(detailPath(testId));
+  redirect(`${detailPath(testId)}?saved=spend-cleared#ad-spend`);
 }
