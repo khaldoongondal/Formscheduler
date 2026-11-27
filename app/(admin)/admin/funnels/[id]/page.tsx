@@ -40,6 +40,7 @@ import {
   duplicateFunnelAction,
   moveIntakeFlowItemAction,
   updateAnalyticsTargetCountriesAction,
+  updateBrowserTrackingAction,
   updateContactFieldsAction,
   updateFunnelAction,
   updateFunnelMetaAction,
@@ -101,6 +102,7 @@ import { DEFAULT_CONSENT_LABEL } from "@/lib/meta/pixel-input";
 import { listPixels, type PixelSummary } from "@/lib/meta/pixels";
 import { listGhlConnections } from "@/lib/ghl/connections";
 import type { Json, QuestionType } from "@/lib/types/database";
+import { browserTrackingFields, readBrowserTrackingSettings } from "@/lib/tracking/settings";
 import { SaveSubmitButton } from "@/components/admin/save-submit-button";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { CopySnippetButton } from "@/components/admin/copy-snippet-button";
@@ -137,6 +139,7 @@ export default async function FunnelDetailPage({
   params: Promise<{ id: string }>;
   searchParams?: Promise<{
     error?: string;
+    trackingError?: string;
     from?: string;
     option?: string;
     preset?: string;
@@ -334,6 +337,8 @@ export default async function FunnelDetailPage({
   const settingsSaved = query.saved === "funnel" || query.saved === "created" || query.saved === "duplicated";
   const intakeFlowSaved = query.saved === "intake-flow" || query.saved === "contact-fields";
   const analyticsFiltersSaved = query.saved === "analytics-filters";
+  const browserTracking = readBrowserTrackingSettings(funnel.browser_tracking);
+  const serverPixel = pixels?.find((pixel) => pixel.id === funnel.meta_pixel_id);
   const targetCountryCodes = resolveAnalyticsTargetCountryCodes(funnel.qualification_rule);
   const targetTrafficSources = resolveAnalyticsTrafficSources(funnel.qualification_rule);
   const contactFieldConfig = resolveContactFieldConfig(funnel.qualification_rule);
@@ -532,7 +537,8 @@ export default async function FunnelDetailPage({
         <SettingsJump href="#questions" label="Question flow" description="Contact fields, qualification questions, and answers." />
         <SettingsJump href="#logo" label="Logo" description="Drop in an optional first-screen logo file." />
         <SettingsJump href="#embed-links" label="Embed and links" description="Full-page, iframe, and popup snippets." />
-        <SettingsJump href="#meta" label="Meta pixel" description="Send this form's events to Meta from our server." />
+        <SettingsJump href="#meta" label="Server-side Meta events" description="Choose a pixel and configure Meta consent for this form." />
+        <SettingsJump href="#browser-tracking" label="Browser tracking" description="Connect Meta Pixel, Tag Manager, Google Analytics or Clarity." />
       </section>
 
       <section className="space-y-6">
@@ -1201,9 +1207,69 @@ export default async function FunnelDetailPage({
             </CardContent>
           </Card>
 
+          <Card id="browser-tracking" className="scroll-mt-24">
+            <CardHeader>
+              <SectionTitle icon={<BarChart3 className="h-5 w-5" />} title="Browser tracking" />
+              <CardDescription>
+                Visitors can opt in to these tools on the public form. Leave a field blank to turn off that integration.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form action={updateBrowserTrackingAction} className="space-y-5">
+                <input type="hidden" name="id" value={funnel.id} />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {Object.entries(browserTrackingFields).map(([key, field]) => (
+                    <div key={key} className="space-y-2">
+                      <Label htmlFor={`browser_${key}`}>{field.label}</Label>
+                      <Input
+                        id={`browser_${key}`}
+                        name={`browser_${key}`}
+                        defaultValue={browserTracking[key as keyof typeof browserTracking]}
+                        placeholder={field.example}
+                        pattern={field.pattern.source}
+                        title={`Example: ${field.example}`}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-describedby={`browser_${key}_help`}
+                      />
+                      <p id={`browser_${key}_help`} className="text-xs leading-5 text-slate-600">
+                        {key === "meta_pixel_id" && (serverPixel
+                          ? `Use ${serverPixel.dataset_id} to pair browser events with this form’s server-side Meta pixel.`
+                          : "If you also use server-side Meta events, use the same pixel ID here.")}
+                        {key === "gtm_container_id" && <>Use custom event triggers for other vendors. Tags run in an isolated frame and can use the form events below.</>}
+                        {key === "ga4_measurement_id" && "Use the ID from your web data stream. If your container installs GA4, leave this blank."}
+                        {key === "clarity_project_id" && "Use a project with cookie consent enabled. Clarity receives cookieless form events. Form recordings and heatmaps are unavailable here."}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                {browserTracking.meta_pixel_id && funnel.meta_pixel_id && serverPixel?.dataset_id !== browserTracking.meta_pixel_id && (
+                  <p role="status" className="text-sm text-amber-800">
+                    Browser Pixel delivery is paused. Enter the dataset ID of the attached server-side pixel so Meta can match the events.
+                  </p>
+                )}
+                <p className="text-xs leading-5 text-slate-600">Configure each vendor once, either here or inside Tag Manager. For an ad campaign, verify a completed lead or booking in the destination account before buying traffic.</p>
+                <details className="text-sm leading-6 text-slate-700">
+                  <summary className="cursor-pointer font-medium">Set up conversion events</summary>
+                  <ul className="mt-2 list-disc space-y-2 pl-5">
+                    <li>In Tag Manager, create a Custom Event trigger with the exact name <code>formbook_lead</code> or <code>formbook_booked_call</code>. Attach your conversion tag and publish your container. Additional events include <code>formbook_form_start</code>, <code>formbook_step_view</code> and <code>formbook_qualified_lead</code>.</li>
+                    <li>In GA4, use Realtime to check for <code>generate_lead</code> and <code>formbook_booked_call</code> after an opted-in submission. Mark the event you optimize for as a key event.</li>
+                    <li>For campaign reporting, add UTM parameters to your ad landing URL. Keep personal details out of campaign names and other URL parameters.</li>
+                    <li>For Meta ad attribution, connect the same dataset under Server-side Meta events so FormBook can send available Meta click IDs. The isolated browser Pixel has limited cookie access. Check in Events Manager that the conversion counts once.</li>
+                  </ul>
+                </details>
+                {typeof query.trackingError === "string" && <ActionError message={query.trackingError} />}
+                <div className="flex flex-wrap items-center gap-2">
+                  <SaveSubmitButton label="Save browser tracking" />
+                  {query.saved === "browser-tracking" ? <SavedBadge label="Browser tracking saved" /> : null}
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
           <Card id="meta" className="scroll-mt-24">
             <CardHeader>
-              <SectionTitle icon={<Radio className="h-5 w-5" />} title="Meta pixel" />
+              <SectionTitle icon={<Radio className="h-5 w-5" />} title="Server-side Meta events" />
               <CardDescription>
                 Send this form&apos;s events to Meta from our server. Only this form&apos;s events go to the pixel you choose.
               </CardDescription>

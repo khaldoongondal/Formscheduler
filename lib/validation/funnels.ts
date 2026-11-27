@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { browserTrackingSettingsSchema } from "@/lib/tracking/settings";
 import type { Json } from "@/lib/types/database";
 import {
   contactFieldKeys,
@@ -72,6 +73,7 @@ export const createFunnelSchema = z.object({
   disabled_question_ids: z.array(z.string().uuid()).optional(),
   analytics_target_country_codes: z.array(z.string()).optional(),
   analytics_traffic_sources: z.array(z.string()).optional(),
+  browser_tracking: browserTrackingSettingsSchema.nullable().optional(),
   opportunity_name_template: z.string().min(2).max(200).default("{{lead_name}}"),
   theme: funnelThemeSchema,
   /** Starter template the form is created from (migration 0033). Create only. */

@@ -1,4 +1,5 @@
 import { FBCLID_SEEN_STORAGE_KEY, META_EVENT_MESSAGE_TYPE } from "@/lib/meta/constants";
+import type { ClientMetaEvent } from "@/lib/meta/client-events";
 
 /**
  * Browser side of the Meta bridge (decision M17). Tells the embedding page the
@@ -7,7 +8,7 @@ import { FBCLID_SEEN_STORAGE_KEY, META_EVENT_MESSAGE_TYPE } from "@/lib/meta/con
  * Client-safe: no Node imports.
  */
 
-export type BrowserMetaEvent = { event_name: string; event_id: string };
+export type BrowserMetaEvent = ClientMetaEvent;
 
 export function postMetaEvents(events: BrowserMetaEvent[] | undefined | null): void {
   if (!events?.length || typeof window === "undefined") return;

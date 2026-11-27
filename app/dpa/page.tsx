@@ -53,7 +53,7 @@ export default function DpaPage() {
             "Have a lawful basis for collecting the data, and get consent where the law requires it.",
             "Publish its own privacy notice where the form appears, naming the customer as the business collecting the data.",
             "Do not collect sensitive data, passwords or payment card numbers through a form.",
-            "Follow Meta's terms when connecting a Meta pixel, and tell people about it where required."
+            "Identify the measurement tools used on the form, including any tags enabled through Google Tag Manager, and follow each provider's terms."
           ]}
         />
       </LegalSection>
@@ -79,7 +79,7 @@ export default function DpaPage() {
             "Vercel: hosting.",
             "GoHighLevel: the customer's own CRM and calendar, and Gondal Tech's own CRM for account emails.",
             "Cloudflare Turnstile, when enabled: bot checks at signup.",
-            "Meta: only when the customer connects a Meta pixel."
+            "Meta, Google Analytics, Google Tag Manager and Microsoft Clarity: optional measurement tools used when the customer connects its own account."
           ]}
         />
         <p>

@@ -21,7 +21,7 @@ type CopySource = { name: string };
 export function funnelCopyPayload<T extends CopySource>(
   source: T,
   slug: string
-): Omit<T, "id" | "created_at" | "updated_at" | "taken_down_at" | "taken_down_reason" | "questions" | "frozen_at"> &
+): Omit<T, "id" | "created_at" | "updated_at" | "taken_down_at" | "taken_down_reason" | "questions" | "frozen_at" | "browser_tracking"> &
   typeof FUNNEL_COPY_RESETS & { name: string; slug: string; is_published: false } {
   const {
     id: _id,
@@ -31,14 +31,16 @@ export function funnelCopyPayload<T extends CopySource>(
     taken_down_at: _takenDownAt,
     taken_down_reason: _takenDownReason,
     questions: _questions,
+    // A copy gets its own tag destinations when the owner configures them.
+    browser_tracking: _browserTracking,
     // A copy starts as a plain draft: the frozen mark (migration 0032) is never copied.
     // Left out rather than set to null, so a database without the column still accepts the insert.
     frozen_at: _frozenAt,
     ...rest
   } = source as T & Record<string, unknown>;
-  void [_id, _createdAt, _updatedAt, _isPublished, _takenDownAt, _takenDownReason, _questions, _frozenAt];
+  void [_id, _createdAt, _updatedAt, _isPublished, _takenDownAt, _takenDownReason, _questions, _frozenAt, _browserTracking];
   return {
-    ...(rest as Omit<T, "id" | "created_at" | "updated_at" | "taken_down_at" | "taken_down_reason" | "questions" | "frozen_at">),
+    ...(rest as Omit<T, "id" | "created_at" | "updated_at" | "taken_down_at" | "taken_down_reason" | "questions" | "frozen_at" | "browser_tracking">),
     ...FUNNEL_COPY_RESETS,
     name: `${source.name} Copy`,
     slug,

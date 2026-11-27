@@ -12,6 +12,7 @@ import type { FormTemplate } from "@/lib/funnels/templates";
 import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
 import { EXTENSION_BY_MIME, sniffImageMime, type SniffedImage } from "@/lib/security/image-sniff";
 import { getPixel } from "@/lib/meta/pixels";
+import { readBrowserTrackingSettings, type BrowserTrackingSettings } from "@/lib/tracking/settings";
 import {
   PIXEL_MESSAGES,
   consentCheckboxLabelFor,
@@ -84,11 +85,14 @@ export type BookingFunnel = Pick<
    * consent confirmation and the checkbox switched on; else null (no checkbox).
    */
   meta_consent_checkbox_label: string | null;
+  browser_tracking?: BrowserTrackingSettings;
+  /** Attached server pixel governs which browser events may leave the form. */
+  browser_meta_uses_capi?: boolean;
   /** Set only by getPreviewFunnel: the preview shows a note for Calendly forms. */
   calendar_provider?: CalendarKind;
 };
 
-type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge" | "meta_consent_checkbox_label" | "calendar_provider">;
+type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge" | "meta_consent_checkbox_label" | "calendar_provider" | "browser_tracking" | "browser_meta_uses_capi">;
 
 /**
  * One tenant read for public pages: whether the tenant is suspended and whether
@@ -202,7 +206,7 @@ type FunnelSlugRow = Pick<
   | "redirect_url"
   | "qualification_rule"
 > &
-  Partial<Pick<Funnel, "show_intro_headline" | "show_intro_description" | "logo_alignment">>;
+  Partial<Pick<Funnel, "show_intro_headline" | "show_intro_description" | "logo_alignment">> & { browser_tracking?: unknown };
 
 function normalizeBookingFunnelBase(row: FunnelSlugRow): BookingFunnelBase {
   return {
@@ -275,6 +279,7 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
   // Newest columns first; each 42703 (missing column) steps down one select.
   // The last two predate taken_down_at, so they do not filter on it.
   const attempts: { select: string; filterTakenDown: boolean }[] = [
+    { select: `${metaFunnelSelect},browser_tracking`, filterTakenDown: true },
     { select: metaFunnelSelect, filterTakenDown: true },
     { select: funnelSelect, filterTakenDown: true },
     { select: fallbackWithoutLogoAlignmentSelect, filterTakenDown: false },
@@ -309,10 +314,23 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
   if (tenantFlags.suspended) return null;
 
   const metaConsentCheckboxLabel = consentCheckboxLabelFor(funnelRow);
-  const questions = await loadBookingQuestions(funnelBase.id);
+  const browserTracking = readBrowserTrackingSettings(funnelRow?.browser_tracking);
+  const [questions, pixel] = await Promise.all([
+    loadBookingQuestions(funnelBase.id),
+    browserTracking.meta_pixel_id && funnelRow?.meta_pixel_id
+      ? supabase.from("meta_pixels").select("dataset_id")
+          .eq("id", funnelRow.meta_pixel_id).eq("tenant_id", funnelBase.tenant_id).maybeSingle()
+      : Promise.resolve(null)
+  ]);
+  // Never deliver a server-approved event ID to a different browser dataset.
+  if (funnelRow?.meta_pixel_id && browserTracking.meta_pixel_id !== pixel?.data?.dataset_id) {
+    delete browserTracking.meta_pixel_id;
+  }
 
   return {
     ...funnelBase,
+    browser_tracking: browserTracking,
+    browser_meta_uses_capi: Boolean(funnelRow?.meta_pixel_id),
     show_badge: tenantFlags.showBadge,
     meta_consent_checkbox_label: metaConsentCheckboxLabel,
     questions
@@ -511,6 +529,9 @@ export async function createFunnel(input: unknown) {
     if (friendly) throw new Error(friendly);
 
     const missingColumn = getMissingInsertColumn(error.message, insertPayload);
+    if (missingColumn === "browser_tracking") {
+      throw new Error("Apply migration 0036 before creating a form with browser tracking.");
+    }
     if (!missingColumn) throw new Error(error.message);
     delete insertPayload[missingColumn];
   }

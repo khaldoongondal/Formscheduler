@@ -7,7 +7,7 @@ import type { LeadSession } from "@/lib/types/database";
  * lead event ids. Pure: no Next.js or Supabase imports (type imports only).
  */
 
-export type ClientMetaEvent = { event_name: string; event_id: string };
+export type ClientMetaEvent = { event_name: string; event_id: string; browser_dataset_id?: string };
 
 /**
  * Only events that are on their way to Meta are told to the browser. Held
@@ -17,7 +17,11 @@ export type ClientMetaEvent = { event_name: string; event_id: string };
 export function toClientEvents(rows: Array<QueuedMetaEvent | null | undefined>): ClientMetaEvent[] {
   return rows
     .filter((row): row is QueuedMetaEvent => Boolean(row) && row!.status === "pending")
-    .map((row) => ({ event_name: row.eventName, event_id: row.eventId }));
+    .map((row) => ({
+      event_name: row.eventName,
+      event_id: row.eventId,
+      ...(row.browserDatasetId ? { browser_dataset_id: row.browserDatasetId } : {})
+    }));
 }
 
 /**

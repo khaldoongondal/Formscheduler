@@ -65,20 +65,25 @@ export default function PrivacyPage() {
             "HubSpot: only when a customer connects it as the CRM for a form. Lead details are sent to the customer's own HubSpot account.",
             "Webhook addresses: when a customer chooses a webhook as the CRM for a form, FormBook sends lead details to the web address the customer chose.",
             "Cloudflare Turnstile, when enabled: a check that a signup comes from a person and not a bot.",
-            "Meta: only when a customer connects a Meta pixel to a form."
+            "Meta, Google Analytics, Google Tag Manager and Microsoft Clarity: measurement tools a business can choose for its own forms. The business also chooses any tags it adds through Tag Manager."
           ]}
         />
       </LegalSection>
 
-      <LegalSection title="4. Data sent to Meta">
-        <p>
-          When a customer connects a Meta pixel to a form, FormBook sends form events and hashed contact data (such as
-          a hashed email address and phone number) to Meta on that customer&apos;s instruction, and only to the pixel the
-          customer supplied. The customer is responsible for telling people about this and getting any consent it needs.
+      <LegalSection title="4. Form measurement">
+        <p id="browser-measurement">
+          FormBook records visits, form starts, steps, leads and bookings for the business that owns the form. A
+          separate checkbox lists the optional browser tools that business has connected. Checking it allows those
+          tools to receive activity on this visit, such as a form view or a completed booking. Tags can receive
+          the form identifier, campaign information and technical details such as your IP address and browser.
+          The browser integration excludes your contact details and answers from its event payloads.
+          You can leave the box unchecked and still book. Unchecking it stops further browser tag events for that visit.
         </p>
         <p>
-          When a customer connects a Meta pixel, FormBook sends form events to Meta with hashed contact details (such as
-          email and phone), the visitor&apos;s IP address and browser details, and Meta click and browser IDs when present.
+          A business can also connect Meta&apos;s server-side Conversions API. That connection has separate consent
+          settings. It can send events, hashed email addresses and phone numbers, IP addresses, browser details
+          and available Meta click and browser IDs to the business&apos;s own pixel. The business is responsible
+          for explaining its choices and obtaining any consent it needs.
         </p>
       </LegalSection>
 
@@ -107,7 +112,8 @@ export default function PrivacyPage() {
         <LegalList
           items={[
             "The FormBook admin uses sign-in cookies to keep you signed in.",
-            "Public forms keep a random visitor id in your browser's local storage so the business can count views and starts for its form."
+            "Public forms keep a random visitor id in your browser's local storage so the business can count views and starts for its form.",
+            "If you opt in on a form connected directly to Google Analytics, FormBook can store a separate random identifier for that form. Unchecking the optional measurement box removes this identifier from that browser."
           ]}
         />
       </LegalSection>

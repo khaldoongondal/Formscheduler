@@ -1,3 +1,5 @@
+import type { BrowserTrackingSettings } from "@/lib/tracking/settings";
+
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type LeadSessionStatus =
@@ -157,6 +159,8 @@ export interface Funnel {
   taken_down_reason: string | null;
   /** Meta pixel this form sends events to (migration 0027). */
   meta_pixel_id?: string | null;
+  /** Public browser tag IDs belonging to this form (migration 0036). */
+  browser_tracking?: BrowserTrackingSettings | null;
   /** The customer's confirmation that they have consent to send lead data to Meta. */
   meta_consent_confirmed_at?: string | null;
   meta_consent_confirmed_by?: string | null;

@@ -29,6 +29,8 @@ import type { CalendarKind, CrmKind } from "@/lib/connections/types";
 import { addFormSpend, deleteFormSpend } from "@/lib/spend/service";
 import { funnelDeleteBlocker } from "@/lib/split-tests/rules";
 import { listSplitTestsUsingFunnel } from "@/lib/split-tests/service";
+import { browserTrackingFromForm } from "@/lib/tracking/settings";
+import { firstZodMessage } from "@/lib/meta/pixel-input";
 import type { QuestionType } from "@/lib/types/database";
 import { TEMPLATE_QUESTIONS_FAILED_MESSAGE, getFormTemplate } from "@/lib/funnels/templates";
 import {
@@ -434,6 +436,19 @@ export async function updateAnalyticsTargetCountriesAction(formData: FormData) {
 
   revalidatePath(`/admin/funnels/${id}`);
   redirect(`/admin/funnels/${id}?saved=analytics-filters#performance`);
+}
+
+export async function updateBrowserTrackingAction(formData: FormData) {
+  const id = trimmedString(formData, "id");
+  await assertAdminFunnel(id);
+  try {
+    await updateFunnel({ id, browser_tracking: browserTrackingFromForm(formData) });
+  } catch (error) {
+    const message = firstZodMessage(error) ?? adminActionErrorMessage(error);
+    redirect(`/admin/funnels/${id}?trackingError=${encodeURIComponent(message)}#browser-tracking`);
+  }
+  revalidatePath(`/admin/funnels/${id}`);
+  redirect(`/admin/funnels/${id}?saved=browser-tracking#browser-tracking`);
 }
 
 export async function updateFunnelMetaAction(formData: FormData) {

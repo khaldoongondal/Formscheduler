@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <title>Form measurement</title>
+</head>
+<body>
+<script>
+  // A public visit or an unsandboxed embed can never run a container on the app origin.
+  if (window.origin === "null" && window.parent !== window) {
+    window.addEventListener("message", function initialize(event) {
+      if (event.source !== window.parent || event.data?.type !== "formbook:init" || !event.ports[0]) return;
+      window.removeEventListener("message", initialize);
+      const port = event.ports[0];
+      const settings = event.data.settings;
+      const mode = event.data.mode;
+      const formId = event.data.formId;
+      const googleId = settings.ga4_measurement_id;
+      const containerId = settings.gtm_container_id;
+      const clarityId = settings.clarity_project_id;
+      const pixelId = settings.meta_pixel_id;
+      const attribution = event.data.attribution || {};
+      // The sandbox cannot access cookies. Some browsers still report their global
+      // cookie preference here, which makes tags attempt writes that throw.
+      try { Object.defineProperty(navigator, "cookieEnabled", { configurable: true, value: false }); } catch {}
+
+      function loadScript(src) {
+        const script = document.createElement("script");
+        script.async = true;
+        script.referrerPolicy = "no-referrer";
+        script.src = src;
+        document.head.appendChild(script);
+      }
+
+      if (containerId) {
+        window.dataLayer = [{ ...attribution, "gtm.start": Date.now(), event: "gtm.js" }];
+        loadScript("https://www.googletagmanager.com/gtm.js?id=" + encodeURIComponent(containerId));
+      }
+      function gtag() { window.formbookGoogle.push(arguments); }
+      if (googleId) {
+        window.formbookGoogle = [];
+        const pageLocation = new URL("/" + (mode === "embed" ? "embed" : "book") + "/" + encodeURIComponent(formId), location.href);
+        for (const key of ["gclid", "dclid", "gbraid", "wbraid"]) {
+          if (attribution[key]) pageLocation.searchParams.set(key, attribution[key]);
+        }
+        const campaign = {};
+        const campaignFields = {
+          utm_source: "campaign_source", utm_medium: "campaign_medium", utm_campaign: "campaign_name",
+          utm_id: "campaign_id", utm_content: "campaign_content", utm_term: "campaign_term"
+        };
+        for (const [key, field] of Object.entries(campaignFields)) {
+          if (attribution[key]) campaign[field] = attribution[key];
+        }
+        gtag("js", new Date());
+        gtag("config", googleId, {
+          send_page_view: false,
+          page_location: pageLocation.href,
+          page_title: "Booking form",
+          page_referrer: "",
+          client_id: event.data.gaClientId,
+          ...campaign,
+          allow_google_signals: false,
+          allow_ad_personalization_signals: false
+        });
+        loadScript("https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(googleId) + "&l=formbookGoogle");
+      }
+      if (clarityId) {
+        window.clarity = function () { (window.clarity.q ||= []).push(arguments); };
+        window.clarity("consentv2", { analytics_Storage: "denied", ad_Storage: "denied" });
+        window.clarity("set", "formbook_form_id", formId);
+        window.clarity("set", "formbook_mode", mode);
+        loadScript("https://www.clarity.ms/tag/" + encodeURIComponent(clarityId));
+      }
+
+      let pixelStarted = false;
+      function sendPixel(event) {
+        if (!pixelId) return;
+        if (!pixelStarted) {
+          pixelStarted = true;
+          const fbq = function () {
+            if (fbq.callMethod) fbq.callMethod.apply(fbq, arguments);
+            else fbq.queue.push(arguments);
+          };
+          window.fbq = window._fbq = fbq;
+          fbq.push = fbq;
+          fbq.loaded = true;
+          fbq.version = "2.0";
+          fbq.queue = [];
+          fbq("set", "autoConfig", false, pixelId);
+          fbq("init", pixelId);
+          loadScript("https://connect.facebook.net/en_US/fbevents.js");
+        }
+        window.fbq(event.standard ? "trackSingle" : "trackSingleCustom", pixelId, event.name, {}, { eventID: event.id });
+      }
+
+      const googleEvents = {
+        form_view: "page_view",
+        form_start: "form_start",
+        step_view: "formbook_step_view",
+        lead: "generate_lead",
+        qualified_lead: "qualify_lead",
+        disqualified_lead: "disqualify_lead",
+        booked_call: "formbook_booked_call"
+      };
+      port.onmessage = ({ data }) => {
+        if (data.type === "pixel") {
+          sendPixel(data);
+        } else if (data.type === "flush") {
+          port.postMessage({ type: "flushed" });
+        } else if (data.type === "event" && Object.hasOwn(googleEvents, data.name)) {
+          const name = "formbook_" + data.name;
+          const params = { formbook_mode: mode, formbook_form_id: formId };
+          if (Number.isInteger(data.step)) params.formbook_step = data.step;
+          if (containerId) window.dataLayer.push({ event: name, ...params, ...attribution });
+          if (googleId) gtag("event", googleEvents[data.name], { ...params, send_to: googleId });
+          if (clarityId) window.clarity("event", name);
+        }
+      };
+    });
+  }
+</script>
+</body>
+</html>

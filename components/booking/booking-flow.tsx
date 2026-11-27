@@ -18,6 +18,8 @@ import {
   writeVisitorCookie
 } from "@/lib/booking/visitor-id";
 import { FormFooter } from "@/components/booking/form-footer";
+import { startBrowserTracking } from "@/components/booking/browser-tracking";
+import { forgetGaClientId } from "@/lib/tracking/attribution";
 import { postMetaEvents, rememberFbclidSeenAt, type BrowserMetaEvent } from "@/components/booking/meta-bridge";
 import { PhoneInput } from "@/components/booking/phone-input";
 import { CalendlyInline } from "@/components/booking/calendly-inline";
@@ -51,6 +53,7 @@ interface AnalyticsResponse {
 }
 
 interface BookingResponse {
+  attempt?: { status: string } | null;
   meta_events?: BrowserMetaEvent[];
 }
 
@@ -425,7 +428,11 @@ function getIntakePageTrackingMetadata(page: IntakePage, pageIndex: number) {
   };
 }
 
-export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId = null, preview = false }: BookingFlowProps) {
+export function BookingFlow(props: BookingFlowProps) {
+  return <BookingVisit key={`${props.funnel.id}:${props.mode}:${Boolean(props.preview)}`} {...props} />;
+}
+
+function BookingVisit({ funnel, mode, splitTest = null, initialVisitorId = null, preview = false }: BookingFlowProps) {
   const [step, setStep] = useState<FlowStep>("intake");
   const [previewTheme, setPreviewTheme] = useState<PreviewTheme | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -442,6 +449,9 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   const trackedStepViewsRef = useRef<Set<string>>(new Set());
   const pageLoadIdRef = useRef<string | null>(null);
   const formStartedRef = useRef(false);
+  const browserTracker = useRef<ReturnType<typeof startBrowserTracking> | null>(null);
+  const browserEventsSeen = useRef(new Set<string>());
+  const hasBrowserTracking = !preview && Object.keys(funnel.browser_tracking ?? {}).length > 0;
   const [metaConsent, setMetaConsent] = useState(false);
   const metaConsentLabel = funnel.meta_consent_checkbox_label ?? null;
   const splitTestId = preview ? null : splitTest?.id ?? null;
@@ -460,6 +470,32 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const intakePages = useMemo(() => buildIntakePages(funnel), [funnel]);
   const currentIntakePage = intakePages[intakePageIndex];
+
+  useEffect(() => () => {
+    browserTracker.current?.stop();
+    browserTracker.current = null;
+  }, []);
+
+  function changeBrowserConsent(granted: boolean) {
+    browserTracker.current?.stop();
+    browserTracker.current = null;
+    if (!granted) {
+      if (funnel.browser_tracking?.ga4_measurement_id) forgetGaClientId(funnel.id);
+      return;
+    }
+    if (!hasBrowserTracking || !funnel.browser_tracking) return;
+    const tracker = startBrowserTracking(funnel.browser_tracking, funnel.id, mode, Boolean(funnel.browser_meta_uses_capi),
+      browserEventsSeen.current, getPageLoadId());
+    browserTracker.current = tracker;
+    tracker.track("form_view");
+    if (step === "intake" && currentIntakePage) tracker.track("step_view", intakePageIndex + 1);
+    if (step === "slots") tracker.track("step_view", intakePages.length + 1);
+  }
+
+  function dispatchMetaEvents(events: BrowserMetaEvent[] | undefined) {
+    postMetaEvents(events);
+    browserTracker.current?.trackServerPixel(events);
+  }
   const lastContactPageIndex = useMemo(
     () => intakePages.map((page) => page.type).lastIndexOf("contact"),
     [intakePages]
@@ -558,7 +594,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       ...(splitTestId ? { test_id: splitTestId } : {}),
       metadata: { ...trackingParams, page_load_id: getPageLoadId() }
     })
-      .then((response) => postMetaEvents(response?.meta_event ? [response.meta_event] : undefined))
+      .then((response) => dispatchMetaEvents(response?.meta_event ? [response.meta_event] : undefined))
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per form and mode, like before
   }, [funnel.id, mode]);
@@ -580,6 +616,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
           : null;
 
     if (!stepMetadata) return;
+    browserTracker.current?.track("step_view", stepMetadata.step_index);
 
     const dedupeKey = `${stepMetadata.step_key}:${sessionId ?? visitorId}`;
     if (trackedStepViewsRef.current.has(dedupeKey)) return;
@@ -608,6 +645,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     if (formStartedRef.current) return;
     formStartedRef.current = true;
     if (preview) return;
+    browserTracker.current?.track("form_start");
     void postJson<AnalyticsResponse>("/api/analytics", {
       funnel_id: funnel.id,
       lead_session_id: sessionId ?? undefined,
@@ -619,7 +657,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       ...splitTestPayload(),
       metadata: { ...getTrackingParams(), page_load_id: getPageLoadId() }
     })
-      .then((response) => postMetaEvents(response?.meta_event ? [response.meta_event] : undefined))
+      .then((response) => dispatchMetaEvents(response?.meta_event ? [response.meta_event] : undefined))
       .catch(() => undefined);
   }
 
@@ -708,7 +746,8 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     });
     const leadSessionId = response.session.id;
     setSessionId(leadSessionId);
-    postMetaEvents(response.meta_events);
+    browserTracker.current?.track("lead");
+    dispatchMetaEvents(response.meta_events);
     return leadSessionId;
   }
 
@@ -787,11 +826,13 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
         event_uri: eventUri,
         invitee_uri: inviteeUri
       });
-      postMetaEvents(response?.meta_events);
+      browserTracker.current?.track("booked_call");
+      dispatchMetaEvents(response?.meta_events);
     } catch {
       // The booking exists in Calendly; its signed notification records it in FormBook.
     }
     if (funnel.redirect_url) {
+      if (browserTracker.current) await browserTracker.current.beforeRedirect();
       redirectAfterBooking(funnel.redirect_url);
       return;
     }
@@ -825,8 +866,10 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
         slot_end: slot.endTime,
         timezone
       });
-      postMetaEvents(booking?.meta_events);
+      if (booking?.attempt?.status === "booked") browserTracker.current?.track("booked_call");
+      dispatchMetaEvents(booking?.meta_events);
       if (funnel.redirect_url) {
+        if (browserTracker.current) await browserTracker.current.beforeRedirect();
         redirectAfterBooking(funnel.redirect_url);
         return;
       }
@@ -890,8 +933,10 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       const hasSavedAnswers = funnel.questions.some((question) => answerSnapshot[question.id] !== undefined);
       if (hasSavedAnswers) {
         const result = await saveAnswers(leadSessionId, answerSnapshot);
-        postMetaEvents(result.meta_events);
+        dispatchMetaEvents(result.meta_events);
+        if (result.qualified) browserTracker.current?.track("qualified_lead");
         if (result.disqualified) {
+          browserTracker.current?.track("disqualified_lead");
           setStep("disqualified");
           return;
         }
@@ -1205,6 +1250,23 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
           </>
         )}
       </section>
+      {hasBrowserTracking ? (
+        <div className="mx-auto mt-3 max-w-xl px-4 text-xs leading-5 text-slate-600">
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-1 h-4 w-4 shrink-0" onChange={(event) => changeBrowserConsent(event.target.checked)} />
+            <span>Allow this business to measure my form activity with {[
+              funnel.browser_tracking?.meta_pixel_id && "Meta Pixel",
+              funnel.browser_tracking?.ga4_measurement_id && "Google Analytics",
+              funnel.browser_tracking?.clarity_project_id && "Microsoft Clarity",
+              funnel.browser_tracking?.gtm_container_id && "tags configured in Google Tag Manager"
+            ].filter(Boolean).join(", ")}.</span>
+          </label>
+          <p className="mt-1 pl-6">
+            You can use the form with this box unchecked. Uncheck it at any time to stop these tags for this visit.{" "}
+            <a className="underline underline-offset-2" href="/privacy#browser-measurement" target="_blank" rel="noopener noreferrer">How measurement works</a>
+          </p>
+        </div>
+      ) : null}
       {preview ? null : <FormFooter slug={funnel.slug} mode={mode} showBadge={funnel.show_badge} />}
     </main>
   );

@@ -16,16 +16,18 @@ export type QueuedMetaEvent = {
   id: string;
   eventName: string;
   eventId: string;
+  /** Present only when the currently configured browser pixel matches this event's destination. */
+  browserDatasetId?: string;
   status: "awaiting_consent" | "held" | "pending";
 };
 
-export type PixelGate = PixelSwitches & { sending_mode: SendingMode };
+export type PixelGate = PixelSwitches & { sending_mode: SendingMode; dataset_id: string };
 
 type FunnelMeta = Pick<Funnel, "id" | "tenant_id"> &
-  Partial<Pick<Funnel, "meta_pixel_id" | "meta_consent_confirmed_at" | "meta_consent_checkbox_enabled">>;
+  Partial<Pick<Funnel, "meta_pixel_id" | "meta_consent_confirmed_at" | "meta_consent_checkbox_enabled" | "browser_tracking">>;
 
 const GATE_COLUMNS =
-  "sending_mode,send_form_view,send_form_start,send_lead,send_qualified_lead,send_disqualified_lead,send_booked_call";
+  "dataset_id,sending_mode,send_form_view,send_form_start,send_lead,send_qualified_lead,send_disqualified_lead,send_booked_call";
 
 function logError(message: string, error: unknown) {
   // Never log payloads, tokens or personal data.
@@ -166,7 +168,11 @@ export async function enqueueMetaEvent(input: EnqueueInput): Promise<QueuedMetaE
       row = (existing.data as Row | null) ?? undefined;
     }
     if (!row || !isWaitingStatus(row.status)) return null;
-    return { id: row.id, eventName: row.event_name, eventId: row.event_id, status: row.status };
+    const browserDatasetId = input.funnel.browser_tracking?.meta_pixel_id;
+    return {
+      id: row.id, eventName: row.event_name, eventId: row.event_id, status: row.status,
+      ...(browserDatasetId && browserDatasetId === pixel?.dataset_id ? { browserDatasetId } : {})
+    };
   } catch (error) {
     logError(`enqueue ${input.key} failed`, error);
     return null;
