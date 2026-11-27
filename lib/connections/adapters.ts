@@ -5,9 +5,12 @@
  */
 import type { ConnectionRow } from "@/lib/connections/service";
 import { calcomContext, calcomProvider } from "@/lib/connections/calcom";
+import { calendlyContext, calendlyProvider } from "@/lib/connections/calendly";
 import { ghlCalendarProvider, type GhlCalendarCtx } from "@/lib/connections/ghl-calendar";
 import { googleCalendarContext, googleCalendarProvider } from "@/lib/connections/google-calendar";
 import { ghlCrmProvider, type GhlCrmCtx } from "@/lib/connections/ghl-crm";
+import { hubspotContext, hubspotCrmProvider } from "@/lib/connections/hubspot";
+import { webhookContext, webhookCrmProvider } from "@/lib/connections/webhook";
 import type { CalendarKind, CalendarProvider, CrmKind, CrmProvider } from "@/lib/connections/types";
 import { resolveGhlRuntimeConfig } from "@/lib/ghl/connections";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -18,7 +21,8 @@ export type AdapterEntry = {
   crm?: CrmProvider<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   /** Null when the connection cannot be used right now. */
   calendarContext?(row: ConnectionRow | GhlConnection | null, funnel: Funnel): Promise<unknown | null>;
-  crmContext?(row: ConnectionRow | GhlConnection, funnel: Funnel): Promise<unknown | null>;
+  /** `funnel` is null when the queued event's form was deleted since. */
+  crmContext?(row: ConnectionRow | GhlConnection, funnel: Funnel | null): Promise<unknown | null>;
 };
 
 function isGhlConnection(row: ConnectionRow | GhlConnection | null): row is GhlConnection {
@@ -53,7 +57,7 @@ export const ADAPTERS: Partial<Record<CalendarKind | CrmKind, AdapterEntry>> = {
       };
     },
     async crmContext(row, funnel): Promise<GhlCrmCtx | null> {
-      if (!isGhlConnection(row) || !row.is_active) return null;
+      if (!funnel || !isGhlConnection(row) || !row.is_active) return null;
       return {
         config: await resolveGhlRuntimeConfig(row),
         funnel,
@@ -74,6 +78,27 @@ export const ADAPTERS: Partial<Record<CalendarKind | CrmKind, AdapterEntry>> = {
     async calendarContext(row, funnel) {
       if (!row || isGhlConnection(row)) return null;
       return calcomContext(row, funnel);
+    }
+  },
+  calendly: {
+    calendar: calendlyProvider,
+    async calendarContext(row, funnel) {
+      if (!row || isGhlConnection(row)) return null;
+      return calendlyContext(row, funnel);
+    }
+  },
+  hubspot: {
+    crm: hubspotCrmProvider,
+    async crmContext(row, funnel) {
+      if (isGhlConnection(row)) return null;
+      return hubspotContext(row, funnel);
+    }
+  },
+  webhook: {
+    crm: webhookCrmProvider,
+    async crmContext(row) {
+      if (isGhlConnection(row)) return null;
+      return webhookContext(row);
     }
   }
 };

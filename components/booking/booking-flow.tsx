@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import type { BookingFunnel, BookingQuestion } from "@/lib/funnels/service";
 import {
   contactFieldOptions,
@@ -20,6 +20,7 @@ import {
 import { FormFooter } from "@/components/booking/form-footer";
 import { postMetaEvents, rememberFbclidSeenAt, type BrowserMetaEvent } from "@/components/booking/meta-bridge";
 import { PhoneInput } from "@/components/booking/phone-input";
+import { CalendlyInline } from "@/components/booking/calendly-inline";
 
 type FlowStep = "intake" | "slots" | "booked" | "disqualified";
 type AnswerValue = string | string[];
@@ -43,12 +44,25 @@ interface BookingResponse {
   meta_events?: BrowserMetaEvent[];
 }
 
+interface CalendlyEmbedSpec {
+  mode: "embed";
+  provider: "calendly";
+  url: string;
+  prefill: { name?: string; email?: string; firstName?: string; lastName?: string };
+}
+
 interface SlotResponse {
   slots: Array<{
     startTime: string;
     endTime: string;
     timezone: string;
   }>;
+  /** Left out by GoHighLevel forms. "embed" shows the provider's own scheduler (Calendly). */
+  calendar?: { mode: "slots" } | CalendlyEmbedSpec;
+}
+
+interface CalendlyConfirmResponse {
+  meta_events?: BrowserMetaEvent[];
 }
 
 interface SubmitAnswersResponse {
@@ -403,6 +417,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [contactValues, setContactValues] = useState<ContactValues>({});
   const [slots, setSlots] = useState<SlotResponse["slots"]>([]);
+  const [calendlyEmbed, setCalendlyEmbed] = useState<CalendlyEmbedSpec | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -709,7 +724,37 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       timezone
     });
     setSlots(response.slots);
+    setCalendlyEmbed(response.calendar?.mode === "embed" ? response.calendar : null);
   }
+
+  /** Calendly reported a booking: FormBook checks it server-side, then shows the booked state either way. */
+  async function confirmCalendlyBooking(eventUri: string, inviteeUri: string) {
+    if (!sessionId) return;
+    setError(null);
+    try {
+      const response = await postJson<CalendlyConfirmResponse>("/api/bookings/calendly", {
+        lead_session_id: sessionId,
+        event_uri: eventUri,
+        invitee_uri: inviteeUri
+      });
+      postMetaEvents(response?.meta_events);
+    } catch {
+      // The booking exists in Calendly; its signed notification records it in FormBook.
+    }
+    if (funnel.redirect_url) {
+      redirectAfterBooking(funnel.redirect_url);
+      return;
+    }
+    setStep("booked");
+  }
+
+  const calendlyArea = calendlyEmbed ? (
+    <CalendlyInline
+      url={calendlyEmbed.url}
+      prefill={calendlyEmbed.prefill}
+      onScheduled={(eventUri, inviteeUri) => void confirmCalendlyBooking(eventUri, inviteeUri)}
+    />
+  ) : null;
 
   async function bookSlot(slot: SlotResponse["slots"][number]) {
     if (!sessionId) return;
@@ -1030,7 +1075,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
                   {step === "slots" ? (
                     isEmbed ? (
-                      <SlotPicker
+                      calendlyArea ?? <SlotPicker
                         groupedSlots={groupedSlots}
                         isLoading={isLoading}
                         onBookSlot={bookSlot}
@@ -1063,6 +1108,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
             {!isEmbed || step !== "slots" ? (
               <BookingPanel
+                calendly={calendlyArea}
                 groupedSlots={groupedSlots}
                 isLoading={isLoading}
                 onBookSlot={bookSlot}
@@ -1195,9 +1241,12 @@ function BookingPanel({
   selectedSlot,
   step,
   timezone,
-  accentSoftColor
+  accentSoftColor,
+  calendly = null
 }: {
   accentSoftColor: string;
+  /** Calendly's own scheduler, shown instead of the time list. */
+  calendly?: ReactNode;
   className?: string;
   groupedSlots: Array<{ dateLabel: string; slots: SlotResponse["slots"] }>;
   isLoading: boolean;
@@ -1227,13 +1276,15 @@ function BookingPanel({
               <p className="text-sm leading-6 text-slate-600">Confirmation details will be sent to the contact information provided.</p>
             </div>
           ) : step === "slots" ? (
-            <SlotPicker
-              groupedSlots={groupedSlots}
-              isLoading={isLoading}
-              onBookSlot={onBookSlot}
-              selectedSlot={selectedSlot}
-              timezone={timezone}
-            />
+            calendly ?? (
+              <SlotPicker
+                groupedSlots={groupedSlots}
+                isLoading={isLoading}
+                onBookSlot={onBookSlot}
+                selectedSlot={selectedSlot}
+                timezone={timezone}
+              />
+            )
           ) : (
             <LockedCalendarPreview accentSoftColor={accentSoftColor} />
           )}

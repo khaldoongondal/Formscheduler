@@ -4,6 +4,9 @@ export const IP_LIMITS = {
   analytics: { limit: 120, windowSeconds: 60 },
   bookings: { limit: 5, windowSeconds: 60 },
   "booking-slots": { limit: 30, windowSeconds: 60 },
+  // Calendly booking confirmations: the browser fast path and Calendly's signed webhook.
+  "booking-confirm": { limit: 10, windowSeconds: 60 },
+  "calendly-webhook": { limit: 600, windowSeconds: 60 },
   "lead-sessions": { limit: 10, windowSeconds: 60 },
   "lead-answers": { limit: 60, windowSeconds: 60 },
   "lead-abandon": { limit: 20, windowSeconds: 60 },

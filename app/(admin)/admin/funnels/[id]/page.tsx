@@ -5,8 +5,12 @@ import { PROVIDERS, pickerValue, providerLabel } from "@/lib/connections/registr
 import { listConnections, type ConnectionSummary } from "@/lib/connections/service";
 import type { CalendarKind, CrmKind } from "@/lib/connections/types";
 import { ConnectionPickers } from "@/components/admin/connection-pickers";
-import { CalcomPanel, GoogleCalendarPanel } from "@/components/admin/calendar-panels";
+import { CalcomPanel, CalendlyPanel, GoogleCalendarPanel } from "@/components/admin/calendar-panels";
+import { HubspotPanel, WebhookPanel } from "@/components/admin/crm-panels";
 import { loadCalcomEventTypes } from "@/lib/connections/calcom";
+import { loadCalendlyEventTypes } from "@/lib/connections/calendly";
+import { loadHubspotPipelines } from "@/lib/connections/hubspot";
+import { parseHubspotSettings } from "@/lib/hubspot/mapping";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -228,6 +232,15 @@ export default async function FunnelDetailPage({
       ? await loadCalcomEventTypes(funnel.tenant_id, funnel.calendar_connection_id)
       : null;
   const savedCalcomEventTypeId = Number(savedCalendarSettings.event_type_id);
+  const calendlyEventTypes =
+    calendarKind === "calendly" && funnel.calendar_connection_id
+      ? await loadCalendlyEventTypes(funnel.tenant_id, funnel.calendar_connection_id)
+      : null;
+  const savedCalendlyEventTypeUri =
+    calendarKind === "calendly" && typeof savedCalendarSettings.event_type_uri === "string" ? savedCalendarSettings.event_type_uri : null;
+  const hubspotPipelines =
+    crmKind === "hubspot" && funnel.crm_connection_id ? await loadHubspotPipelines(funnel.tenant_id, funnel.crm_connection_id) : null;
+  const savedHubspotSettings = parseHubspotSettings(crmKind === "hubspot" ? funnel.crm_settings : null);
   // Active forms that cannot take bookings (for example activated before this check existed).
   const bookingSetupWarning = funnel.is_published
     ? formReadinessError(
@@ -663,9 +676,23 @@ export default async function FunnelDetailPage({
                           selectedId={Number.isInteger(savedCalcomEventTypeId) && savedCalcomEventTypeId > 0 ? savedCalcomEventTypeId : null}
                           windowDays={funnel.availability_window_days ?? 14}
                         />
-                      )
+                      ),
+                      calendly: (
+                        <CalendlyPanel
+                          eventTypes={calendlyEventTypes ? (calendlyEventTypes.ok ? calendlyEventTypes.eventTypes : null) : []}
+                          selectedUri={savedCalendlyEventTypeUri}
+                        />
+                      ),
+                      hubspot: (
+                        <HubspotPanel
+                          pipelines={hubspotPipelines ? (hubspotPipelines.ok ? hubspotPipelines.pipelines : null) : []}
+                          settings={savedHubspotSettings}
+                          dealNameTemplate={funnel.opportunity_name_template}
+                        />
+                      ),
+                      webhook: <WebhookPanel connectionId={crmKind === "webhook" ? funnel.crm_connection_id ?? null : null} />
                     }}
-                    panelsNeedingSave={["calcom"]}
+                    panelsNeedingSave={["calcom", "calendly", "hubspot"]}
                   />
                 </SettingsGroup>
 

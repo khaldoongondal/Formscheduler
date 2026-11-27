@@ -1,4 +1,7 @@
 {
   "framework": "nextjs",
-  "crons": [{ "path": "/api/cron/meta-events", "schedule": "*/5 * * * *" }]
+  "crons": [
+    { "path": "/api/cron/meta-events", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/crm-events", "schedule": "*/5 * * * *" }
+  ]
 }

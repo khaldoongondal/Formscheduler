@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { CALCOM_COPY } from "@/lib/calcom/constants";
 import type { CalcomEventType } from "@/lib/calcom/mapping";
-import { CALCOM_PANEL_MARKER, GOOGLE_PANEL_MARKER } from "@/lib/connections/calendar-settings";
+import { CALENDLY_COPY } from "@/lib/calendly/constants";
+import type { CalendlyEventType } from "@/lib/calendly/mapping";
+import { CALCOM_PANEL_MARKER, CALENDLY_PANEL_MARKER, GOOGLE_PANEL_MARKER } from "@/lib/connections/calendar-settings";
 import { GOOGLE_COPY } from "@/lib/google/copy";
 
 const selectClass =
@@ -96,6 +98,49 @@ export function CalcomPanel({
           {CALCOM_COPY.confirmationNote}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** Calendly fields in the form editor (P3.7). Event types were loaded server-side for the saved connection. */
+export function CalendlyPanel({
+  eventTypes,
+  selectedUri
+}: {
+  eventTypes: CalendlyEventType[] | null;
+  selectedUri: string | null;
+}) {
+  return (
+    <div className="space-y-3">
+      <input type="hidden" name={CALENDLY_PANEL_MARKER} value="1" />
+      <div className="space-y-2">
+        <label htmlFor="calendly_event_type_uri" className="text-sm font-medium text-slate-950">
+          {CALENDLY_COPY.eventTypeLabel}
+        </label>
+        {eventTypes === null ? (
+          <>
+            <input type="hidden" name="calendly_event_type_uri" value={selectedUri ?? ""} />
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {CALENDLY_COPY.eventTypesLoadFailed}
+            </p>
+          </>
+        ) : eventTypes.length === 0 ? (
+          <>
+            <input type="hidden" name="calendly_event_type_uri" value="" />
+            <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{CALENDLY_COPY.noEventTypes}</p>
+          </>
+        ) : (
+          <select id="calendly_event_type_uri" name="calendly_event_type_uri" className={selectClass} defaultValue={selectedUri ?? ""}>
+            <option value="">{CALENDLY_COPY.eventTypePlaceholder}</option>
+            {eventTypes.map((eventType) => (
+              <option key={eventType.uri} value={eventType.uri}>
+                {eventType.duration ? `${eventType.name} (${eventType.duration} min)` : eventType.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      <p className="text-xs leading-5 text-slate-500">{CALENDLY_COPY.panelNote}</p>
     </div>
   );
 }

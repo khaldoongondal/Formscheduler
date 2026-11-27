@@ -10,6 +10,11 @@ import {
   setConnectionDisabledAction
 } from "@/app/(admin)/admin/connections/actions";
 import { AvailabilityForm } from "@/app/(admin)/admin/connections/availability-form";
+import { CalendlySection, HubspotSection, WebhookSection } from "@/app/(admin)/admin/connections/provider-sections";
+import { CALENDLY_COPY } from "@/lib/calendly/constants";
+import { HUBSPOT_COPY } from "@/lib/hubspot/constants";
+import { WEBHOOK_COPY } from "@/lib/webhooks/copy";
+import { createServiceClient } from "@/lib/supabase/server";
 import { ActionError, ActionSuccess, ConnectionStatusBadge } from "@/app/(admin)/admin/connections/connection-ui";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { CALCOM_COPY } from "@/lib/calcom/constants";
@@ -37,15 +42,39 @@ const SAVED_MESSAGES: Record<string, string> = {
   renamed: CONNECTIONS_COPY.savedRenamed,
   disabled: CONNECTIONS_COPY.savedDisabled,
   enabled: CONNECTIONS_COPY.savedEnabled,
-  checked: CONNECTIONS_COPY.savedChecked
+  checked: CONNECTIONS_COPY.savedChecked,
+  "calendly-created": CALENDLY_COPY.created,
+  "calendly-token": CALENDLY_COPY.tokenReplaced,
+  "calendly-confirmations": CALENDLY_COPY.confirmationsSetUp,
+  "hubspot-created": HUBSPOT_COPY.created,
+  "hubspot-token": HUBSPOT_COPY.tokenReplaced,
+  "webhook-created": WEBHOOK_COPY.created,
+  "webhook-address": WEBHOOK_COPY.addressSaved,
+  "webhook-secret": WEBHOOK_COPY.secretReplaced
 };
+
+/** The "Send test" result, read from this tenant's own delivery log row. */
+async function loadTestResult(tenantId: string, connectionId: string, deliveryId: string | undefined) {
+  if (!deliveryId || !isUuid(deliveryId)) return null;
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from("crm_event_deliveries")
+    .select("status,response_status,response_summary")
+    .eq("id", deliveryId)
+    .eq("tenant_id", tenantId)
+    .eq("connection_id", connectionId)
+    .eq("event_type", "test.ping")
+    .maybeSingle();
+  if (!data) return null;
+  return { sent: data.status === "sent", status: data.response_status ?? null, summary: data.response_summary ?? "" };
+}
 
 export default async function ConnectionDetailPage({
   params,
   searchParams
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ saved?: string; error?: string }>;
+  searchParams?: Promise<{ saved?: string; error?: string; test?: string }>;
 }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
@@ -60,6 +89,8 @@ export default async function ConnectionDetailPage({
   const isGoogle = connection.provider === "google_calendar";
   const isCalcom = connection.provider === "calcom";
   const availability = isGoogle ? parseAvailability(connection.availability) ?? DEFAULT_AVAILABILITY : null;
+  const isWebhook = connection.provider === "webhook";
+  const testResult = isWebhook ? await loadTestResult(tenantId, connection.id, query.test).catch(() => null) : null;
 
   return (
     <div className="mx-auto grid max-w-4xl gap-6">
@@ -139,6 +170,10 @@ export default async function ConnectionDetailPage({
         </Card>
       ) : null}
 
+      {connection.provider === "calendly" ? <CalendlySection connection={connection} /> : null}
+      {connection.provider === "hubspot" ? <HubspotSection connection={connection} /> : null}
+      {isWebhook ? <WebhookSection connection={connection} testResult={testResult} /> : null}
+
       <Card>
         <CardContent className="space-y-5 p-5">
           <form action={renameConnectionAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -160,10 +195,13 @@ export default async function ConnectionDetailPage({
                 pendingLabel="Saving..."
               />
             </form>
-            <form action={checkConnectionAction}>
-              <input type="hidden" name="id" value={connection.id} />
-              <SaveSubmitButton label={CONNECTIONS_COPY.checkConnection} variant="outline" pendingLabel="Checking..." />
-            </form>
+            {/* A webhook is checked with Send test above. */}
+            {isWebhook ? null : (
+              <form action={checkConnectionAction}>
+                <input type="hidden" name="id" value={connection.id} />
+                <SaveSubmitButton label={CONNECTIONS_COPY.checkConnection} variant="outline" pendingLabel="Checking..." />
+              </form>
+            )}
           </div>
           <p className="text-sm text-slate-600">
             {connection.lastCheckedAt

@@ -3,12 +3,15 @@
  * Chosen ids are re-validated against a fresh list from the provider.
  */
 import { CALCOM_COPY } from "@/lib/calcom/constants";
+import { CALENDLY_COPY, EVENT_TYPE_URI_PATTERN, SCHEDULING_URL_PATTERN } from "@/lib/calendly/constants";
 import { loadCalcomEventTypes } from "@/lib/connections/calcom";
+import { loadCalendlyEventTypes } from "@/lib/connections/calendly";
 import type { CalendarKind } from "@/lib/connections/types";
 
 /** Hidden inputs the editor panels post so the action knows the panel was shown. */
 export const GOOGLE_PANEL_MARKER = "google_panel";
 export const CALCOM_PANEL_MARKER = "calcom_panel";
+export const CALENDLY_PANEL_MARKER = "calendly_panel";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -47,6 +50,28 @@ export async function calendarSettingsFromForm(input: {
     const eventType = result.eventTypes.find((item) => item.id === eventTypeId);
     if (!eventType) throw new Error(CALCOM_COPY.chooseEventType);
     return { event_type_id: eventType.id, event_type_title: eventType.title, length_minutes: eventType.lengthInMinutes };
+  }
+
+  if (calendarProvider === "calendly" && formData.has(CALENDLY_PANEL_MARKER) && calendarConnectionId && !connectionChanged) {
+    const chosen = String(formData.get("calendly_event_type_uri") ?? "").trim();
+    if (!chosen) return {};
+    if (!EVENT_TYPE_URI_PATTERN.test(chosen)) throw new Error(CALENDLY_COPY.chooseEventType);
+    const current = asRecord(saved.calendarSettings);
+    // Decision C15: the scheduling URL is always re-read from Calendly, never taken from the browser.
+    const result = await loadCalendlyEventTypes(input.tenantId, calendarConnectionId);
+    if (!result.ok) {
+      // Calendly is down: an unchanged choice is kept so other settings still save.
+      if (current.event_type_uri === chosen) return undefined;
+      throw new Error(CALENDLY_COPY.eventTypesLoadFailed);
+    }
+    const eventType = result.eventTypes.find((item) => item.uri === chosen);
+    if (!eventType || !SCHEDULING_URL_PATTERN.test(eventType.schedulingUrl)) throw new Error(CALENDLY_COPY.chooseEventType);
+    return {
+      event_type_uri: eventType.uri,
+      scheduling_url: eventType.schedulingUrl,
+      event_type_name: eventType.name,
+      duration: eventType.duration
+    };
   }
 
   if (connectionChanged) return {};

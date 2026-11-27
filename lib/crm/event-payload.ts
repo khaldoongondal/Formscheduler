@@ -74,10 +74,18 @@ function cap(value: string | null | undefined, max = EVENT_STRING_CAP): string |
   return text.length > max ? text.slice(0, max) : text;
 }
 
-/** "fbk.lead.captured.{ref}"; a booked event adds ".{bookingId}". One id per lead and type. */
+/** Longest event id (crm_event_deliveries.event_id, migration 0031). */
+export const CRM_EVENT_ID_MAX = 160;
+
+/**
+ * "fbk.lead.captured.{ref}"; a booked event adds ".{bookingId}". One id per lead and type.
+ * A long booking id (a Calendly invitee uri) keeps its end, the most specific part, so the id fits 160 characters.
+ */
 export function crmEventId(type: CrmEventType, externalRef: string, suffix?: string): string {
   const base = `fbk.${type}.${externalRef}`;
-  const cleanSuffix = suffix?.trim().replace(/[^A-Za-z0-9_\-:.@]/g, "").slice(0, 200);
+  const room = Math.max(0, CRM_EVENT_ID_MAX - base.length - 1);
+  const cleaned = suffix?.trim().replace(/[^A-Za-z0-9_\-:.@]/g, "") ?? "";
+  const cleanSuffix = room > 0 ? cleaned.slice(-room) : "";
   return cleanSuffix ? `${base}.${cleanSuffix}` : base;
 }
 

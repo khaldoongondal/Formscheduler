@@ -24,7 +24,8 @@ import {
 import { assertOptionInFunnel, assertQuestionInFunnel } from "@/lib/funnels/question-scope";
 import { PICKER_INVALID_MESSAGE, resolvePickerChoices } from "@/lib/connections/registry";
 import { calendarSettingsFromForm } from "@/lib/connections/calendar-settings";
-import type { CalendarKind } from "@/lib/connections/types";
+import { crmSettingsFromForm } from "@/lib/connections/crm-settings";
+import type { CalendarKind, CrmKind } from "@/lib/connections/types";
 import { addFormSpend, deleteFormSpend } from "@/lib/spend/service";
 import { funnelDeleteBlocker } from "@/lib/split-tests/rules";
 import { listSplitTestsUsingFunnel } from "@/lib/split-tests/service";
@@ -305,8 +306,27 @@ export async function updateFunnelAction(formData: FormData) {
             }
           })
         : undefined;
+    const crmSettings =
+      hasConnectionColumns && connectionChoice
+        ? await crmSettingsFromForm({
+            formData,
+            tenantId,
+            crmProvider: (connectionChoice.crm_provider ?? "ghl") as CrmKind,
+            crmConnectionId: connectionChoice.crm_connection_id || null,
+            saved: {
+              crmProvider: (funnel.crm_provider ?? "ghl") as CrmKind,
+              crmConnectionId: funnel.crm_connection_id ?? null,
+              crmSettings: funnel.crm_settings
+            }
+          })
+        : undefined;
+    // The HubSpot panel edits the same name template, labelled "Deal name".
+    const dealNameTemplate = formData.has("hubspot_deal_name_template")
+      ? optionalString(formData, "hubspot_deal_name_template")
+      : null;
     await updateFunnel({
       ...(calendarSettings !== undefined ? { calendar_settings: calendarSettings } : {}),
+      ...(crmSettings !== undefined ? { crm_settings: crmSettings } : {}),
       id,
       name: String(formData.get("name") ?? ""),
       slug: String(formData.get("slug") ?? ""),
@@ -332,7 +352,7 @@ export async function updateFunnelAction(formData: FormData) {
       phone_pulse_enabled: formData.get("phone_pulse_enabled") === "on",
       appointment_title: trimmedString(formData, "appointment_title"),
       opportunity_name_template:
-        optionalString(formData, "opportunity_name_template") ?? "{{lead_name}}",
+        dealNameTemplate ?? optionalString(formData, "opportunity_name_template") ?? "{{lead_name}}",
       is_published: formData.get("is_published") === "on",
       theme: {
         primary_color: String(formData.get("primary_color") ?? "#173f2d"),

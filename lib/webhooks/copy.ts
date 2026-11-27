@@ -1,0 +1,35 @@
+/** Webhook CRM copy (P3.5). Pure: no imports. */
+export const WEBHOOK_COPY = {
+  createHeading: "Add a webhook",
+  createIntro:
+    "FormBook sends each lead event as signed JSON to your address. Use it with n8n, Zapier, Make or any tool that can receive a webhook.",
+  nameLabel: "Name",
+  defaultName: "Webhook",
+  addressLabel: "Address",
+  addressPlaceholder: "https://...",
+  addressHelp: "Only public https addresses work. Local and private network addresses are refused.",
+  secretLabel: "Signing secret",
+  secretGenerate: "Generate",
+  secretNote:
+    "Copy this secret now and keep it in your automation tool. FormBook stores it encrypted and only shows the last four characters later.",
+  secretPattern: "The secret must be 24 to 200 characters with no spaces.",
+  createButton: "Add webhook",
+  created: "Webhook added. Send a test to check that your tool receives it.",
+  addressSaved: "Address saved.",
+  secretReplaced: "Secret replaced. Update it in your automation tool too.",
+  addressHeading: "Address",
+  saveAddress: "Save address",
+  secretEnding: (lastFour: string) => `Secret ending in ${lastFour}`,
+  replaceSecret: "Replace secret",
+  sendTest: "Send test",
+  testDelivered: (status: number) => `Test delivered: HTTP ${status}.`,
+  testFailed: (summary: string) => `Test failed: ${summary}`,
+  deliveryLog: "Delivery log",
+  intro: "FormBook posts lead captured, qualified, disqualified and booked events to this address, signed with your secret.",
+  blockedAddress: "The address is not allowed any more. Use a public https address.",
+  redirectNotFollowed: "Redirects are not followed.",
+  timedOut: "No answer within 10 seconds.",
+  networkError: "The address could not be reached.",
+  checkOk: "The address answered the test.",
+  helpLink: "How to verify the signature"
+} as const;

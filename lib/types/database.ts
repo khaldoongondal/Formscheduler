@@ -319,6 +319,38 @@ export interface Connection {
   updated_at: string;
 }
 
+export type CrmDeliveryStatus = "pending" | "sent" | "failed" | "skipped" | "cancelled";
+export type CrmDeliveryEventType = "lead.captured" | "lead.qualified" | "lead.disqualified" | "lead.booked" | "test.ping";
+
+/** One CRM event for one target (migration 0031): queue row and tenant delivery log. */
+export interface CrmEventDelivery {
+  id: string;
+  tenant_id: string;
+  connection_id: string | null;
+  ghl_connection_id: string | null;
+  provider: "ghl" | "hubspot" | "webhook";
+  funnel_id: string | null;
+  lead_session_id: string | null;
+  event_type: CrmDeliveryEventType;
+  event_id: string;
+  /** The frozen FormBook event; wiped 30 days after the row settles. */
+  payload: Json | null;
+  status: CrmDeliveryStatus;
+  status_reason: string | null;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  response_status: number | null;
+  response_summary: string | null;
+  last_error: string | null;
+  sent_at: string | null;
+  settled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AnalyticsEvent {
   id: string;
   tenant_id: string;
@@ -593,6 +625,7 @@ export interface Database {
       meta_pixels: Table<MetaPixel>;
       meta_event_deliveries: Table<MetaEventDelivery>;
       connections: Table<Connection>;
+      crm_event_deliveries: Table<CrmEventDelivery>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -669,6 +702,38 @@ export interface Database {
       meta_match_key_coverage: {
         Args: { p_tenant_id: string; p_pixel_id: string; p_from: string; p_to: string };
         Returns: MetaMatchKeyCoverageRow[];
+      };
+      claim_crm_deliveries: {
+        Args: { p_owner: string; p_limit?: number; p_lease_seconds?: number };
+        Returns: CrmEventDelivery[];
+      };
+      claim_crm_deliveries_by_ids: {
+        Args: { p_ids: string[]; p_owner: string; p_lease_seconds?: number };
+        Returns: CrmEventDelivery[];
+      };
+      settle_crm_delivery: {
+        Args: {
+          p_id: string;
+          p_owner: string;
+          p_outcome: "sent" | "retry" | "failed" | "skipped";
+          p_status?: number | null;
+          p_summary?: string | null;
+          p_error?: string | null;
+          p_reason?: string | null;
+        };
+        Returns: boolean;
+      };
+      release_crm_delivery: {
+        Args: { p_id: string; p_owner: string };
+        Returns: boolean;
+      };
+      retry_crm_delivery: {
+        Args: { p_id: string; p_tenant_id: string };
+        Returns: boolean;
+      };
+      crm_housekeeping: {
+        Args: Record<string, never>;
+        Returns: Json;
       };
       split_test_replace_members: {
         Args: { p_tenant_id: string; p_test_id: string; p_funnel_ids: string[] };

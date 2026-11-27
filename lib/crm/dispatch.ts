@@ -1,17 +1,20 @@
 /**
  * Sends a lead event to the form's CRM after the response (decisions C5,
- * C19, C20). Never throws and never slows the visitor's request: the event
- * is built and delivered inside after().
- *
- * P3 replaces the body with the durable queue; the signature and the
- * GoHighLevel early return stay.
+ * C19, C20). Never throws and never slows the visitor's request: inside
+ * after() the event is built, queued in crm_event_deliveries (the durable
+ * queue and the tenant's delivery log), then delivered at once when it can
+ * go now. The CRM cron delivers anything left.
  */
 import { after } from "next/server";
-import { resolveCrm } from "@/lib/connections/resolve";
-import type { CalendarKind, CrmDeliveryOutcome, CrmLeadState } from "@/lib/connections/types";
+import { crmKindOf } from "@/lib/connections/resolve";
+import type { CalendarKind } from "@/lib/connections/types";
+import { drainCrmDeliveriesByIds } from "@/lib/crm/drain";
 import { buildFormBookEvent } from "@/lib/crm/event-payload";
+import { enqueueCrmEvent } from "@/lib/crm/queue";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel, LeadAnswer, LeadSession, Question } from "@/lib/types/database";
+
+export { applyCrmUpdates, leadStateOf } from "@/lib/crm/drain";
 
 export type DispatchInput = {
   type: "lead.captured" | "lead.qualified" | "lead.disqualified" | "lead.booked";
@@ -59,38 +62,18 @@ async function loadAnswers(session: LeadSession): Promise<Array<LeadAnswer & { q
   }));
 }
 
-export function leadStateOf(session: LeadSession): CrmLeadState {
-  return {
-    crmContactId: session.crm_contact_id ?? null,
-    crmDealId: session.crm_deal_id ?? null,
-    ghlContactId: session.ghl_contact_id,
-    ghlOpportunityId: session.ghl_opportunity_id
-  };
+/** The form's CRM target from its row alone (no decryption). Null: nothing to queue. */
+export function crmTargetOf(
+  funnel: Pick<Funnel, "crm_provider" | "crm_connection_id" | "ghl_connection_id">
+): { provider: "ghl" | "hubspot" | "webhook"; connectionId: string | null; ghlConnectionId: string | null } | null {
+  const provider = crmKindOf(funnel);
+  if (provider === "ghl") return funnel.ghl_connection_id ? { provider, connectionId: null, ghlConnectionId: funnel.ghl_connection_id } : null;
+  return funnel.crm_connection_id ? { provider, connectionId: funnel.crm_connection_id, ghlConnectionId: null } : null;
 }
 
-/** Writes only the given ids, filtered by lead and tenant. */
-export async function applyCrmUpdates(
-  sessionId: string,
-  tenantId: string,
-  updates: CrmDeliveryOutcome["updates"],
-  ghlConnectionId?: string | null
-): Promise<void> {
-  if (!updates) return;
-  const patch: Record<string, string> = {};
-  if (updates.crmContactId) patch.crm_contact_id = updates.crmContactId.slice(0, 200);
-  if (updates.crmDealId) patch.crm_deal_id = updates.crmDealId.slice(0, 200);
-  if (updates.ghlContactId) patch.ghl_contact_id = updates.ghlContactId;
-  if (updates.ghlOpportunityId) patch.ghl_opportunity_id = updates.ghlOpportunityId;
-  if (!Object.keys(patch).length) return;
-  if (ghlConnectionId && (updates.ghlContactId || updates.ghlOpportunityId)) patch.ghl_connection_id = ghlConnectionId;
-  const supabase = createServiceClient();
-  const { error } = await supabase.from("lead_sessions").update(patch).eq("id", sessionId).eq("tenant_id", tenantId);
-  if (error) throw new Error(error.message);
-}
-
-async function deliverNow(input: DispatchInput) {
-  const resolved = await resolveCrm(input.funnel);
-  if (!resolved) return;
+async function queueAndDeliver(input: DispatchInput) {
+  const target = crmTargetOf(input.funnel);
+  if (!target) return;
   const session = await loadLead(input.sessionId, input.funnel.tenant_id);
   if (!session) return;
   const answers = await loadAnswers(session);
@@ -112,11 +95,16 @@ async function deliverNow(input: DispatchInput) {
       : null,
     disqualifyingOptions: input.disqualifyingOptions
   });
-  const outcome = await resolved.provider.deliver(resolved.ctx, event, leadStateOf(session));
-  if (outcome.outcome !== "sent") {
-    console.error("[crm] delivery not sent", resolved.kind, outcome.outcome, outcome.httpStatus ?? "no status");
-  }
-  await applyCrmUpdates(session.id, session.tenant_id, outcome.updates, resolved.ghlConnectionId);
+  const id = await enqueueCrmEvent({
+    tenantId: session.tenant_id,
+    provider: target.provider,
+    connectionId: target.connectionId,
+    ghlConnectionId: target.ghlConnectionId,
+    funnelId: input.funnel.id,
+    leadSessionId: session.id,
+    event
+  });
+  if (id) await drainCrmDeliveriesByIds([id]);
 }
 
 /** Never throws, returns at once. A GoHighLevel calendar keeps its own inline path. */
@@ -125,9 +113,9 @@ export function dispatchCrmEvent(input: DispatchInput): void {
     if ((input.funnel.calendar_provider ?? "ghl") === "ghl") return;
     after(async () => {
       try {
-        await deliverNow(input);
+        await queueAndDeliver(input);
       } catch (error) {
-        console.error("[crm] delivery failed", input.funnel.crm_provider ?? "ghl", shortReason(error));
+        console.error("[crm] queue failed", input.funnel.crm_provider ?? "ghl", shortReason(error));
       }
     });
   } catch (error) {

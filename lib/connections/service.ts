@@ -133,6 +133,20 @@ export async function getConnectionRowForTenant(tenantId: string, id: string): P
   return (data as ConnectionRow | null) ?? null;
 }
 
+/**
+ * Server-only, NOT tenant-scoped: only for an inbound provider webhook whose
+ * address names the connection (the row then supplies the tenant, and the
+ * caller must verify the provider signature before acting on anything).
+ */
+export async function getConnectionRowForWebhook(id: string, provider: GenericProvider): Promise<ConnectionRow | null> {
+  if (!isUuid(id)) return null;
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.from("connections").select("*").eq("id", id).eq("provider", provider).maybeSingle();
+  if (isMissingTable(error)) return null;
+  if (error) throw new Error(error.message);
+  return (data as ConnectionRow | null) ?? null;
+}
+
 export async function renameConnection(tenantId: string, id: string, name: string): Promise<void> {
   const trimmed = name.trim().slice(0, 120);
   if (!trimmed) throw new Error("Please enter a name.");

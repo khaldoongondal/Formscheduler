@@ -106,7 +106,7 @@ export type CrmDeliveryOutcome = {
 
 export interface CrmProvider<Ctx = unknown> {
   kind: CrmKind;
-  /** Idempotent per event id. */
-  deliver(ctx: Ctx, event: FormBookEvent, lead: CrmLeadState): Promise<CrmDeliveryOutcome>;
+  /** Idempotent per event id. `delivery.id` is the queue row (sent as a header by the webhook). */
+  deliver(ctx: Ctx, event: FormBookEvent, lead: CrmLeadState, delivery?: { id: string }): Promise<CrmDeliveryOutcome>;
   check?(ctx: Ctx): Promise<{ ok: boolean; summary: string }>;
 }

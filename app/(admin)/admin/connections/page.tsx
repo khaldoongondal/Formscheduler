@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { PlugZap } from "lucide-react";
+import { WEBHOOK_COPY } from "@/lib/webhooks/copy";
 import {
   createGhlConnectionAction,
   deleteGhlConnectionAction,
@@ -19,6 +21,8 @@ import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { listGhlConnections } from "@/lib/ghl/connections";
 import { isGhlOauthConfigured } from "@/lib/ghl/oauth";
 import { CALCOM_COPY } from "@/lib/calcom/constants";
+import { CALENDLY_COPY } from "@/lib/calendly/constants";
+import { HUBSPOT_COPY } from "@/lib/hubspot/constants";
 import { GOOGLE_COPY } from "@/lib/google/copy";
 import { isGoogleOauthConfigured } from "@/lib/google/oauth";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
@@ -33,7 +37,10 @@ export const dynamic = "force-dynamic";
 
 const ADD_LABELS: Partial<Record<ProviderKind, string>> = {
   google_calendar: GOOGLE_COPY.connectButton,
-  calcom: CALCOM_COPY.createButton
+  calcom: CALCOM_COPY.createButton,
+  calendly: CALENDLY_COPY.createButton,
+  hubspot: HUBSPOT_COPY.createButton,
+  webhook: WEBHOOK_COPY.createButton
 };
 
 export default async function ConnectionsPage({
@@ -140,7 +147,14 @@ export default async function ConnectionsPage({
                     <SaveSubmitButton label="Save" variant="outline" />
                   </div>
                 </form>
-                <form action={deleteGhlConnectionAction} className="mt-3 flex justify-end">
+                <form action={deleteGhlConnectionAction} className="mt-3 flex items-center justify-end gap-4">
+                  {/* Rows exist only for forms that pair GoHighLevel with another calendar. */}
+                  <Link
+                    href={`/admin/connections/${connection.id}/deliveries`}
+                    className="text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-950"
+                  >
+                    {WEBHOOK_COPY.deliveryLog}
+                  </Link>
                   <input type="hidden" name="id" value={connection.id} />
                   <ConfirmDeleteButton
                     label="Delete"

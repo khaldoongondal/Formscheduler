@@ -30,12 +30,12 @@ export const PROVIDERS: Record<ProviderKind, ProviderMeta> = {
   calendly: {
     label: "Calendly",
     roles: ["calendar"],
-    available: false,
+    available: true,
     helpAnchor: "calendly",
     addHref: "/admin/connections/new/calendly"
   },
-  hubspot: { label: "HubSpot", roles: ["crm"], available: false, helpAnchor: "hubspot", addHref: "/admin/connections/new/hubspot" },
-  webhook: { label: "Webhook", roles: ["crm"], available: false, helpAnchor: "webhook", addHref: "/admin/connections/new/webhook" }
+  hubspot: { label: "HubSpot", roles: ["crm"], available: true, helpAnchor: "hubspot", addHref: "/admin/connections/new/hubspot" },
+  webhook: { label: "Webhook", roles: ["crm"], available: true, helpAnchor: "webhook", addHref: "/admin/connections/new/webhook" }
 };
 
 export const PICKER_INVALID_MESSAGE = "Choose a calendar and a CRM from the lists.";
