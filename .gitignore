@@ -9,3 +9,6 @@ coverage
 *.tsbuildinfo
 .DS_Store
 _reference/
+
+# Internal planning notes, never pushed
+docs/private/
