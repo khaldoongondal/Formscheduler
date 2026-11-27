@@ -59,8 +59,14 @@ import { getTenantPlanSummary } from "@/lib/billing/plan-service";
 import { activeLimitMessage } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { buildIframeSnippet, buildPopupSnippet, buildSplitTestIframeSnippet } from "@/lib/embed/snippets";
-import { SPLIT_TEST_COPY, runningTestEditorNote } from "@/lib/split-tests/rules";
-import { getRunningTestsByFunnel } from "@/lib/split-tests/service";
+import {
+  SPLIT_TEST_COPY,
+  funnelDeleteBlocker,
+  funnelDeleteTestNote,
+  runningTestEditorNote,
+  type FunnelTestUse
+} from "@/lib/split-tests/rules";
+import { getRunningTestsByFunnel, listSplitTestsUsingFunnel } from "@/lib/split-tests/service";
 import {
   contactFieldOptions,
   intakeFlowItemToKey,
@@ -144,7 +150,7 @@ export default async function FunnelDetailPage({
     to: query.to
   });
   const analyticsState: { error: string | null } = { error: null };
-  const [connections, analytics, planSummary, runningTests, spendEntries, pixels] = await Promise.all([
+  const [connections, analytics, planSummary, runningTests, spendEntries, pixels, testsUsingForm] = await Promise.all([
     listGhlConnections(funnel.tenant_id),
     getFunnelAnalytics(funnel.id, analyticsRange).catch((error: unknown): FunnelPerformanceRow | null => {
       const message = error instanceof Error ? error.message : "";
@@ -165,8 +171,14 @@ export default async function FunnelDetailPage({
       // Null when the pixel table is missing (migration 0027 not run yet).
       console.error("[meta] pixel list failed", error instanceof Error ? error.message : "unknown error");
       return null;
+    }),
+    // Only feeds the delete confirmation text; the delete action checks again itself.
+    listSplitTestsUsingFunnel(funnel.tenant_id, funnel.id).catch((error: unknown): FunnelTestUse[] => {
+      console.error("[split-tests] form test lookup failed", error instanceof Error ? error.message : "unknown error");
+      return [];
     })
   ]);
+  const deleteBlocker = funnelDeleteBlocker(testsUsingForm);
   const runningTest = runningTests.get(funnel.id) ?? null;
   const activeLimitHint =
     !funnel.is_published && planSummary.plan && planSummary.usage.activeForms >= planSummary.plan.maxActiveForms
@@ -986,12 +998,13 @@ export default async function FunnelDetailPage({
               <CardDescription>Permanent funnel actions.</CardDescription>
             </CardHeader>
             <CardContent>
+              {deleteBlocker ? <p className="mb-3 text-sm text-muted-foreground">{deleteBlocker}</p> : null}
               <form action={deleteFunnelAction}>
                 <input type="hidden" name="id" value={funnel.id} />
                 <ConfirmDeleteButton
                   label="Delete funnel"
                   title="Delete this funnel?"
-                  description={`This permanently deletes "${funnel.name}", including its questions, settings, and local funnel records. This cannot be undone.`}
+                  description={`This permanently deletes "${funnel.name}", including its questions, settings, and local funnel records.${funnelDeleteTestNote(testsUsingForm)} This cannot be undone.`}
                   variant="destructive"
                 />
               </form>

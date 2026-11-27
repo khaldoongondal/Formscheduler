@@ -21,6 +21,24 @@ export const PIXEL_MESSAGES = {
 export const DEFAULT_CONSENT_LABEL =
   "I agree to my details being shared with Meta (Facebook) to measure and improve ads.";
 
+/** The Meta columns the public form load reads along with the form itself. */
+export type FunnelConsentCheckboxFields = {
+  meta_pixel_id?: string | null;
+  meta_consent_confirmed_at?: string | null;
+  meta_consent_checkbox_enabled?: boolean | null;
+  meta_consent_checkbox_label?: string | null;
+};
+
+/**
+ * Text of the Meta consent checkbox on a public form (decision M11 / P3.6).
+ * Null (no checkbox) unless the form has a pixel, the consent confirmation and
+ * the checkbox switched on. Columns missing before migration 0027 mean null.
+ */
+export function consentCheckboxLabelFor(row: FunnelConsentCheckboxFields | null | undefined): string | null {
+  if (!row?.meta_pixel_id || !row.meta_consent_confirmed_at || row.meta_consent_checkbox_enabled !== true) return null;
+  return row.meta_consent_checkbox_label?.trim() || DEFAULT_CONSENT_LABEL;
+}
+
 const ACCESS_TOKEN_PATTERN = /^[A-Za-z0-9._|-]{20,1024}$/;
 const TEST_EVENT_CODE_PATTERN = /^[A-Za-z0-9_-]{1,40}$/;
 

@@ -15,7 +15,7 @@ import {
   type StageCounts,
   type VisitorEventRow
 } from "@/lib/analytics/funnel-math";
-import { chunk, mapInBatches, selectAllPages } from "@/lib/supabase/paging";
+import { chunk, mapInBatches, selectAllByKeyset, selectAllPages } from "@/lib/supabase/paging";
 import { createServiceClient } from "@/lib/supabase/server";
 import type {
   AnalyticsEvent,
@@ -261,6 +261,40 @@ const PERFORMANCE_HISTORY_STATUSES = ["potential", "qualified", "slots_shown", "
 const SESSION_ID_CHUNK = 200;
 
 /**
+ * Status history rows in range. With a form id, only that form's rows are
+ * read (inner join on its lead session), not every form in the tenant.
+ */
+async function loadPerformanceHistory(
+  supabase: ReturnType<typeof createServiceClient>,
+  tenantId: string,
+  fromIso: string,
+  toIso: string,
+  funnelId?: string
+): Promise<LeadStatusHistory[]> {
+  const rows = await selectAllByKeyset<LeadStatusHistory>((afterId, limit) => {
+    let query = supabase
+      .from("lead_status_history")
+      .select(funnelId ? "*, lead_sessions!inner(funnel_id)" : "*")
+      .eq("tenant_id", tenantId)
+      .in("to_status", [...PERFORMANCE_HISTORY_STATUSES])
+      .gte("created_at", fromIso)
+      .lte("created_at", toIso);
+    if (funnelId) query = query.eq("lead_sessions.funnel_id", funnelId);
+    if (afterId) query = query.gt("id", afterId);
+    return query.order("id", { ascending: true }).limit(limit) as unknown as PromiseLike<{
+      data: LeadStatusHistory[] | null;
+      error: { message: string } | null;
+    }>;
+  });
+  if (!funnelId) return rows;
+  return rows.map((row) => {
+    const { lead_sessions: _joined, ...history } = row as LeadStatusHistory & { lead_sessions?: unknown };
+    void _joined;
+    return history as LeadStatusHistory;
+  });
+}
+
+/**
  * Per-form analytics for a date range. Every query is paged (PostgREST returns
  * at most 1000 rows per request) and lead sessions are loaded only when a
  * history row in range points at them. Pass `funnelId` to load one form.
@@ -284,26 +318,18 @@ export async function getFunnelPerformance(
   const [funnelsResult, questionsResult, events, history] = await Promise.all([
     (funnelId ? funnelsQuery.eq("id", funnelId) : funnelsQuery).order("created_at", { ascending: false }),
     (funnelId ? questionsQuery.eq("funnel_id", funnelId) : questionsQuery).order("display_order", { ascending: true }),
-    selectAllPages<AnalyticsEvent>((from, to) => {
-      const query = supabase
+    selectAllByKeyset<AnalyticsEvent>((afterId, limit) => {
+      let query = supabase
         .from("analytics_events")
         .select("*")
         .eq("tenant_id", tenantId)
         .gte("occurred_at", fromIso)
         .lte("occurred_at", toIso);
-      return (funnelId ? query.eq("funnel_id", funnelId) : query).order("id", { ascending: true }).range(from, to);
+      if (funnelId) query = query.eq("funnel_id", funnelId);
+      if (afterId) query = query.gt("id", afterId);
+      return query.order("id", { ascending: true }).limit(limit);
     }),
-    selectAllPages<LeadStatusHistory>((from, to) =>
-      supabase
-        .from("lead_status_history")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .in("to_status", [...PERFORMANCE_HISTORY_STATUSES])
-        .gte("created_at", fromIso)
-        .lte("created_at", toIso)
-        .order("id", { ascending: true })
-        .range(from, to)
-    )
+    loadPerformanceHistory(supabase, tenantId, fromIso, toIso, funnelId)
   ]);
 
   if (funnelsResult.error) throw new Error(funnelsResult.error.message);

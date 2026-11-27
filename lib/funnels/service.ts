@@ -9,8 +9,9 @@ import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
 import { EXTENSION_BY_MIME, sniffImageMime, type SniffedImage } from "@/lib/security/image-sniff";
 import { getPixel } from "@/lib/meta/pixels";
 import {
-  DEFAULT_CONSENT_LABEL,
   PIXEL_MESSAGES,
+  consentCheckboxLabelFor,
+  type FunnelConsentCheckboxFields,
   firstZodMessage,
   funnelMetaSettingsSchema,
   pixelDetached,
@@ -82,30 +83,6 @@ export type BookingFunnel = Pick<
 };
 
 type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge" | "meta_consent_checkbox_label">;
-
-/** Decision M11 / P3.6. Null before migration 0027 or when the checkbox does not apply. */
-async function loadMetaConsentCheckboxLabel(funnelId: string): Promise<string | null> {
-  try {
-    const supabase = createServiceClient();
-    const { data, error } = await supabase
-      .from("funnels")
-      .select("meta_pixel_id,meta_consent_confirmed_at,meta_consent_checkbox_enabled,meta_consent_checkbox_label")
-      .eq("id", funnelId)
-      .maybeSingle();
-    if (error) {
-      if (error.code !== "42703") console.error("[meta] consent settings lookup failed", error.message);
-      return null;
-    }
-    const row = data as Pick<
-      Funnel,
-      "meta_pixel_id" | "meta_consent_confirmed_at" | "meta_consent_checkbox_enabled" | "meta_consent_checkbox_label"
-    > | null;
-    if (!row?.meta_pixel_id || !row.meta_consent_confirmed_at || !row.meta_consent_checkbox_enabled) return null;
-    return row.meta_consent_checkbox_label?.trim() || DEFAULT_CONSENT_LABEL;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * One tenant read for public pages: whether the tenant is suspended and whether
@@ -237,46 +214,39 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
   const filterValue = "slug" in filter ? filter.slug : filter.id;
   const funnelSelect =
     "id,tenant_id,name,slug,description,is_published,logo_url,logo_alignment,show_intro_headline,show_intro_description,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
+  // The Meta consent checkbox settings come with the form row, so a form
+  // without a pixel costs no extra query (P3.12). Falls back without them
+  // before migration 0027.
+  const metaFunnelSelect = `${funnelSelect},meta_pixel_id,meta_consent_confirmed_at,meta_consent_checkbox_enabled,meta_consent_checkbox_label`;
   const fallbackWithoutLogoAlignmentSelect =
     "id,tenant_id,name,slug,description,is_published,logo_url,show_intro_headline,show_intro_description,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
   const fallbackFunnelSelect =
     "id,tenant_id,name,slug,description,is_published,logo_url,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
 
-  const { data: funnel, error: initialFunnelError } = await supabase
-    .from("funnels")
-    .select(funnelSelect)
-    .eq(filterColumn, filterValue)
-    .eq("is_published", true)
-    .is("taken_down_at", null)
-    .single();
-  let funnelBase = funnel ? normalizeBookingFunnelBase(funnel as FunnelSlugRow) : null;
-  let funnelError = initialFunnelError;
+  // Newest columns first; each 42703 (missing column) steps down one select.
+  // The last two predate taken_down_at, so they do not filter on it.
+  const attempts: { select: string; filterTakenDown: boolean }[] = [
+    { select: metaFunnelSelect, filterTakenDown: true },
+    { select: funnelSelect, filterTakenDown: true },
+    { select: fallbackWithoutLogoAlignmentSelect, filterTakenDown: false },
+    { select: fallbackFunnelSelect, filterTakenDown: false }
+  ];
 
-  if (funnelError?.code === "42703") {
-    const fallbackWithoutLogoAlignmentResult = await supabase
+  let funnelRow: (FunnelSlugRow & FunnelConsentCheckboxFields) | null = null;
+  let funnelError: { code?: string; message: string } | null = null;
+  for (const attempt of attempts) {
+    let query = supabase
       .from("funnels")
-      .select(fallbackWithoutLogoAlignmentSelect)
+      .select(attempt.select)
       .eq(filterColumn, filterValue)
-      .eq("is_published", true)
-      .single();
-
-    funnelBase = fallbackWithoutLogoAlignmentResult.data
-      ? normalizeBookingFunnelBase(fallbackWithoutLogoAlignmentResult.data as FunnelSlugRow)
-      : null;
-    funnelError = fallbackWithoutLogoAlignmentResult.error;
-
-    if (funnelError?.code === "42703") {
-      const fallbackResult = await supabase
-        .from("funnels")
-        .select(fallbackFunnelSelect)
-        .eq(filterColumn, filterValue)
-        .eq("is_published", true)
-        .single();
-
-      funnelBase = fallbackResult.data ? normalizeBookingFunnelBase(fallbackResult.data as FunnelSlugRow) : null;
-      funnelError = fallbackResult.error;
-    }
+      .eq("is_published", true);
+    if (attempt.filterTakenDown) query = query.is("taken_down_at", null);
+    const result = await query.single();
+    funnelRow = result.data ? (result.data as unknown as FunnelSlugRow & FunnelConsentCheckboxFields) : null;
+    funnelError = result.error;
+    if (funnelError?.code !== "42703") break;
   }
+  const funnelBase = funnelRow ? normalizeBookingFunnelBase(funnelRow) : null;
 
   if (funnelError) {
     if (funnelError.code === "PGRST116") return null;
@@ -289,14 +259,12 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
   const tenantFlags = await getPublicTenantFlags(funnelBase.tenant_id);
   if (tenantFlags.suspended) return null;
 
-  const [{ data: questions, error: questionsError }, metaConsentCheckboxLabel] = await Promise.all([
-    supabase
-      .from("questions")
-      .select("id,tenant_id,funnel_id,stable_key,label,help_text,question_type,placeholder,is_required,display_order,validation")
-      .eq("funnel_id", funnelBase.id)
-      .order("display_order", { ascending: true }),
-    loadMetaConsentCheckboxLabel(funnelBase.id)
-  ]);
+  const metaConsentCheckboxLabel = consentCheckboxLabelFor(funnelRow);
+  const { data: questions, error: questionsError } = await supabase
+    .from("questions")
+    .select("id,tenant_id,funnel_id,stable_key,label,help_text,question_type,placeholder,is_required,display_order,validation")
+    .eq("funnel_id", funnelBase.id)
+    .order("display_order", { ascending: true });
 
   if (questionsError) throw new Error(questionsError.message);
 
@@ -688,9 +656,10 @@ export async function duplicateFunnel(id: string) {
   return funnel;
 }
 
-export async function deleteFunnel(id: string) {
+/** Deletes the tenant's own form. The caller checks split tests first. */
+export async function deleteFunnel(id: string, tenantId: string) {
   const supabase = createServiceClient();
-  const { error } = await supabase.from("funnels").delete().eq("id", id);
+  const { error } = await supabase.from("funnels").delete().eq("id", id).eq("tenant_id", tenantId);
   if (error) throw new Error(error.message);
 }
 

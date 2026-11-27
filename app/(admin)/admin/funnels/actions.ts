@@ -23,6 +23,8 @@ import {
 } from "@/lib/funnels/disqualification";
 import { assertOptionInFunnel, assertQuestionInFunnel } from "@/lib/funnels/question-scope";
 import { addFormSpend, deleteFormSpend } from "@/lib/spend/service";
+import { funnelDeleteBlocker } from "@/lib/split-tests/rules";
+import { listSplitTestsUsingFunnel } from "@/lib/split-tests/service";
 import type { QuestionType } from "@/lib/types/database";
 import {
   createFunnel,
@@ -477,12 +479,16 @@ export async function duplicateFunnelAction(formData: FormData) {
 
 export async function deleteFunnelAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  await assertAdminFunnel(id);
+  const { tenantId } = await assertAdminFunnel(id);
+  let blocker: string | null = null;
   try {
-    await deleteFunnel(id);
+    // Deleting a form removes it from its split tests, so a running test blocks it.
+    blocker = funnelDeleteBlocker(await listSplitTestsUsingFunnel(tenantId, id));
+    if (!blocker) await deleteFunnel(id, tenantId);
   } catch (error) {
     redirectWithError(`/admin/funnels/${id}`, error);
   }
+  if (blocker) redirect(`/admin/funnels/${id}?error=${encodeURIComponent(blocker)}`);
   revalidatePath("/admin/funnels");
   redirect("/admin/funnels?saved=deleted");
 }

@@ -53,22 +53,40 @@ export type FunnelSendState = {
 };
 
 /**
- * True when a queued row may still go to Meta: its form exists for the same
- * tenant, still uses the row's pixel with the customer's consent
- * confirmation, is live and not taken down, and the tenant is not suspended.
- * A form that changed or dropped its pixel stops every row it queued.
+ * What the drain does with a queued row at send time.
+ * - "send": the form exists for the same tenant, still uses the row's pixel
+ *   with the customer's consent confirmation, is live, and the tenant is active.
+ * - "skip": final. The form is gone, dropped or changed its pixel, lost its
+ *   consent confirmation, or was taken down.
+ * - "defer": temporary. The form is unpublished or the tenant is suspended or
+ *   unknown; the row waits and is checked again later, and the 7-day expiry
+ *   cleans it up if the pause lasts.
  */
+export type FunnelSendDecision = "send" | "defer" | "skip";
+
+export function funnelSendDecision(
+  row: { pixel_id: string; funnel_id: string | null },
+  funnel: FunnelSendState | null
+): FunnelSendDecision {
+  if (!row.funnel_id || !funnel) return "skip";
+  if (!funnel.meta_pixel_id || funnel.meta_pixel_id !== row.pixel_id) return "skip";
+  if (!funnel.meta_consent_confirmed_at) return "skip";
+  if (funnel.taken_down_at) return "skip";
+  if (funnel.is_published !== true) return "defer";
+  if (!funnel.tenant_plan || funnel.tenant_plan === "suspended") return "defer";
+  return "send";
+}
+
+/** True only when a queued row may go to Meta right now. */
 export function funnelStillSends(
   row: { pixel_id: string; funnel_id: string | null },
   funnel: FunnelSendState | null
 ): boolean {
-  if (!row.funnel_id || !funnel) return false;
-  if (!funnel.meta_pixel_id || funnel.meta_pixel_id !== row.pixel_id) return false;
-  if (!funnel.meta_consent_confirmed_at) return false;
-  if (funnel.is_published !== true || funnel.taken_down_at) return false;
-  if (!funnel.tenant_plan || funnel.tenant_plan === "suspended") return false;
-  return true;
+  return funnelSendDecision(row, funnel) === "send";
 }
+
+/** How long a paused form's row waits before the drain checks it again. */
+export const META_DEFER_SECONDS = 900;
 
 /** Rows one cron run may claim; sends take a fraction of a second each. */
 export const CRON_DRAIN_ROW_LIMIT = 400;

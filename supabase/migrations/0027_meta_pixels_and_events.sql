@@ -311,7 +311,7 @@ declare
     when pg_column_size(p_response) > 8192 then '{"truncated": true}'::jsonb
     else p_response end;
 begin
-  if p_outcome not in ('sent', 'retry', 'failed', 'skipped') then
+  if p_outcome not in ('sent', 'retry', 'failed', 'skipped', 'deferred') then
     raise exception 'settle_meta_delivery: unknown outcome %', p_outcome;
   end if;
   select attempts, max_attempts into v_attempts, v_max
@@ -319,11 +319,23 @@ begin
   if not found then
     return false;
   end if;
-  if p_outcome = 'retry' then
+  if p_outcome = 'deferred' then
+    -- The form is unpublished or the tenant is suspended: a pause, not a final
+    -- skip. The row stays pending, the attempt is refunded, and it is checked
+    -- again in 15 minutes; meta_housekeeping expires it after 7 days.
+    update public.meta_event_deliveries
+    set status = 'pending',
+        status_reason = coalesce(left(p_reason, 60), status_reason),
+        attempts = greatest(attempts - 1, 0),
+        next_attempt_at = now() + interval '900 seconds',
+        lease_owner = null, lease_expires_at = null, updated_at = now()
+    where id = p_id;
+  elsif p_outcome = 'retry' then
     v_backoff := least(30 * power(2, greatest(v_attempts - 1, 0))::integer, 3600);
     update public.meta_event_deliveries
     set status = case when v_attempts >= v_max then 'failed' else 'pending' end,
-        status_reason = case when v_attempts >= v_max then 'retry_budget' else status_reason end,
+        status_reason = case when v_attempts >= v_max then 'retry_budget'
+                             when status_reason = 'form_paused' then null else status_reason end,
         last_error = left(case when v_attempts >= v_max then coalesce(p_error, '') || ' (retry budget used up)' else p_error end, 500),
         meta_response = coalesce(v_response, meta_response),
         next_attempt_at = now() + make_interval(secs => v_backoff),
@@ -332,7 +344,7 @@ begin
   else
     update public.meta_event_deliveries
     set status = p_outcome,
-        status_reason = coalesce(left(p_reason, 60), status_reason),
+        status_reason = coalesce(left(p_reason, 60), nullif(status_reason, 'form_paused')),
         last_error = left(p_error, 500),
         meta_response = coalesce(v_response, meta_response),
         sent_at = case when p_outcome = 'sent' then now() else sent_at end,

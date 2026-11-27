@@ -30,6 +30,38 @@ export async function selectAllPages<T>(
   }
 }
 
+/** Default cap for keyset reads: the error fires long before a request times out. */
+export const KEYSET_MAX_ROWS = 50000;
+
+/**
+ * Reads every row of a query in id order with keyset paging: each call gets
+ * the last id seen (null first) and must add `.gt("id", afterId)` when set,
+ * `.order("id")` and `.limit(limit)`. Unlike OFFSET pages, no page re-reads
+ * the rows before it, so the cost grows with the row count, not its square.
+ * Throws TOO_MUCH_DATA_MESSAGE past maxRows.
+ */
+export async function selectAllByKeyset<T extends { id: string }>(
+  build: (afterId: string | null, limit: number) => PromiseLike<PageResult<T>>,
+  opts?: { pageSize?: number; maxRows?: number }
+): Promise<T[]> {
+  const pageSize = opts?.pageSize ?? 1000;
+  const maxRows = opts?.maxRows ?? KEYSET_MAX_ROWS;
+  const rows: T[] = [];
+  let afterId: string | null = null;
+
+  for (;;) {
+    const { data, error } = await build(afterId, pageSize);
+    if (error) throw new Error(error.message);
+    const page = data ?? [];
+    for (const row of page) rows.push(row);
+    if (rows.length > maxRows) throw new Error(TOO_MUCH_DATA_MESSAGE);
+    if (page.length < pageSize) return rows;
+    const lastId: string = page[page.length - 1].id;
+    if (afterId !== null && lastId <= afterId) throw new Error("Keyset paging did not advance; order the query by id.");
+    afterId = lastId;
+  }
+}
+
 /** Splits a list into chunks (for `.in()` filters that must stay short). */
 export function chunk<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];

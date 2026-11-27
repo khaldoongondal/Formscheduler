@@ -131,3 +131,23 @@ export function unavailableMemberWarning(formName: string): string {
 export function runningTestEditorNote(testName: string): string {
   return `This form is in the running split test ${testName}. Switching it to draft sends all test traffic to the other forms.`;
 }
+
+/** A split test that uses a form, as the delete check sees it. */
+export type FunnelTestUse = { name: string; status: SplitTestStatus };
+
+/** The reason a form cannot be deleted, or null. Only a running test blocks it. */
+export function funnelDeleteBlocker(tests: readonly FunnelTestUse[]): string | null {
+  const running = tests.find((test) => test.status === "running");
+  if (!running) return null;
+  return `This form is in the running split test "${running.name}". End the test before you delete it.`;
+}
+
+/** Extra text for the delete confirmation when draft or ended tests use the form. */
+export function funnelDeleteTestNote(tests: readonly FunnelTestUse[]): string {
+  const others = tests.filter((test) => test.status !== "running");
+  if (!others.length) return "";
+  const names = others.map((test) => `"${test.name}"`).join(", ");
+  return others.length === 1
+    ? ` The split test ${names} will lose this form and its results for it.`
+    : ` The split tests ${names} will lose this form and their results for it.`;
+}

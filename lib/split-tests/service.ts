@@ -4,6 +4,7 @@ import { planLimitMessageForTenant } from "@/lib/billing/plan-service";
 import { checkSlug } from "@/lib/funnels/slugs";
 import {
   SPLIT_TEST_MESSAGES,
+  type FunnelTestUse,
   formNotActiveMessage,
   parseSplitTestStatus,
   splitTestFormIds,
@@ -385,4 +386,33 @@ export async function getRunningTestsByFunnel(tenantId: string): Promise<Map<str
     console.error("[split-tests] running test lookup failed", error instanceof Error ? error.message : "unknown error");
   }
   return result;
+}
+
+/**
+ * Every split test of the tenant that uses this form, for the delete check.
+ * Unlike getRunningTestsByFunnel this throws when the lookup fails, so a
+ * failed read never lets a form in a running test be deleted. Returns an
+ * empty list only when the split test tables do not exist yet (before 0025).
+ */
+export async function listSplitTestsUsingFunnel(tenantId: string, funnelId: string): Promise<FunnelTestUse[]> {
+  noStore();
+  const supabase = createServiceClient();
+  const { data: members, error: membersError } = await supabase
+    .from("split_test_members")
+    .select("test_id")
+    .eq("tenant_id", tenantId)
+    .eq("funnel_id", funnelId);
+  if (membersError) {
+    if (membersError.code === "42P01" || membersError.code === "PGRST205") return [];
+    throw new Error(membersError.message);
+  }
+  const testIds = [...new Set((members ?? []).map((member) => member.test_id))];
+  if (!testIds.length) return [];
+  const { data: tests, error } = await supabase
+    .from("split_tests")
+    .select("id,name,status")
+    .eq("tenant_id", tenantId)
+    .in("id", testIds);
+  if (error) throw new Error(error.message);
+  return (tests ?? []).map((test) => ({ name: test.name, status: parseSplitTestStatus(test.status) }));
 }

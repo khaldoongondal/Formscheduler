@@ -17,7 +17,7 @@ import {
   type SplitCall
 } from "@/lib/split-tests/results";
 import { getSplitTest, type SplitTestWithMembers } from "@/lib/split-tests/service";
-import { chunk, mapInBatches, selectAllPages } from "@/lib/supabase/paging";
+import { chunk, mapInBatches, selectAllByKeyset } from "@/lib/supabase/paging";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Json, LeadSessionStatus, Question } from "@/lib/types/database";
 
@@ -78,28 +78,32 @@ export async function getSplitTestResults(
   const memberIdList = [...memberIds];
 
   const [events, sessions, questionsResult, funnelsResult, spendRows] = await Promise.all([
-    selectAllPages<EventRow>(
-      (from, to) =>
-        supabase
-          .from("analytics_events")
-          .select("id,visitor_id,funnel_id,event_type,occurred_at,step_key:metadata->>step_key")
-          .eq("tenant_id", tenantId)
-          .eq("split_test_id", testId)
-          .gte("occurred_at", period.from.toISOString())
-          .lte("occurred_at", period.to.toISOString())
-          .order("id", { ascending: true })
-          .range(from, to) as unknown as PromiseLike<{ data: EventRow[] | null; error: { message: string } | null }>
-    ),
-    selectAllPages<TestSessionRow>(
-      (from, to) =>
-        supabase
-          .from("lead_sessions")
-          .select("id,visitor_id,funnel_id,started_at")
-          .eq("tenant_id", tenantId)
-          .eq("split_test_id", testId)
-          .order("id", { ascending: true })
-          .range(from, to) as unknown as PromiseLike<{ data: TestSessionRow[] | null; error: { message: string } | null }>
-    ),
+    selectAllByKeyset<EventRow>((afterId, limit) => {
+      let query = supabase
+        .from("analytics_events")
+        .select("id,visitor_id,funnel_id,event_type,occurred_at,step_key:metadata->>step_key")
+        .eq("tenant_id", tenantId)
+        .eq("split_test_id", testId)
+        .gte("occurred_at", period.from.toISOString())
+        .lte("occurred_at", period.to.toISOString());
+      if (afterId) query = query.gt("id", afterId);
+      return query.order("id", { ascending: true }).limit(limit) as unknown as PromiseLike<{
+        data: EventRow[] | null;
+        error: { message: string } | null;
+      }>;
+    }),
+    selectAllByKeyset<TestSessionRow>((afterId, limit) => {
+      let query = supabase
+        .from("lead_sessions")
+        .select("id,visitor_id,funnel_id,started_at")
+        .eq("tenant_id", tenantId)
+        .eq("split_test_id", testId);
+      if (afterId) query = query.gt("id", afterId);
+      return query.order("id", { ascending: true }).limit(limit) as unknown as PromiseLike<{
+        data: TestSessionRow[] | null;
+        error: { message: string } | null;
+      }>;
+    }),
     memberIdList.length
       ? supabase
           .from("questions")
@@ -124,20 +128,19 @@ export async function getSplitTestResults(
     ),
     5,
     (ids) =>
-      selectAllPages<TestHistoryRow & { id: string }>(
-        (from, to) =>
-          supabase
-            .from("lead_status_history")
-            .select("id,lead_session_id,to_status,created_at")
-            .eq("tenant_id", tenantId)
-            .in("lead_session_id", ids)
-            .in("to_status", RESULT_STATUSES)
-            .order("id", { ascending: true })
-            .range(from, to) as unknown as PromiseLike<{
-            data: Array<TestHistoryRow & { id: string }> | null;
-            error: { message: string } | null;
-          }>
-      )
+      selectAllByKeyset<TestHistoryRow & { id: string }>((afterId, limit) => {
+        let query = supabase
+          .from("lead_status_history")
+          .select("id,lead_session_id,to_status,created_at")
+          .eq("tenant_id", tenantId)
+          .in("lead_session_id", ids)
+          .in("to_status", RESULT_STATUSES);
+        if (afterId) query = query.gt("id", afterId);
+        return query.order("id", { ascending: true }).limit(limit) as unknown as PromiseLike<{
+          data: Array<TestHistoryRow & { id: string }> | null;
+          error: { message: string } | null;
+        }>;
+      })
   );
   const history = historyChunks.flat();
 

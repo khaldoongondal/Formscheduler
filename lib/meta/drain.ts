@@ -2,7 +2,7 @@ import {
   CRON_DRAIN_BATCH_SIZE,
   CRON_DRAIN_ROW_LIMIT,
   classifyFailure,
-  funnelStillSends,
+  funnelSendDecision,
   shouldStopClaiming,
   type FunnelSendState
 } from "@/lib/meta/delivery-rules";
@@ -22,7 +22,7 @@ import type { Json, MetaEventDelivery } from "@/lib/types/database";
  * leased when time runs out is released so the next run can take it at once.
  */
 
-export type DeliveryOutcome = "sent" | "retry" | "failed" | "skipped";
+export type DeliveryOutcome = "sent" | "retry" | "failed" | "skipped" | "deferred";
 
 export type DrainTally = {
   claimed: number;
@@ -30,6 +30,7 @@ export type DrainTally = {
   retry: number;
   failed: number;
   skipped: number;
+  deferred: number;
   released: number;
   deadlineHit: boolean;
 };
@@ -147,11 +148,16 @@ export async function deliverMetaRow(row: MetaEventDelivery, owner: string, deps
   }
 
   // The form is re-read at send time: a form that dropped or changed its pixel,
-  // lost its consent confirmation, went offline, or whose tenant was suspended
-  // sends nothing it queued earlier.
+  // lost its consent confirmation, or was taken down sends nothing it queued
+  // earlier. An unpublished form or a suspended tenant is a pause, so the row
+  // waits (pending, attempt refunded) instead of being lost.
   const funnelState = row.funnel_id ? await loadFunnelState(row.funnel_id, row.tenant_id) : null;
-  if (!funnelStillSends(row, funnelState)) {
+  const decision = funnelSendDecision(row, funnelState);
+  if (decision === "skip") {
     return settle({ outcome: "skipped", reason: "pixel_detached" });
+  }
+  if (decision === "defer") {
+    return settle({ outcome: "deferred", reason: "form_paused" });
   }
 
   // Switches are re-read at send time: an event switched off while it waited is not sent.
@@ -229,7 +235,7 @@ async function deliverBatch(
 }
 
 function emptyTally(): DrainTally {
-  return { claimed: 0, sent: 0, retry: 0, failed: 0, skipped: 0, released: 0, deadlineHit: false };
+  return { claimed: 0, sent: 0, retry: 0, failed: 0, skipped: 0, deferred: 0, released: 0, deadlineHit: false };
 }
 
 /**

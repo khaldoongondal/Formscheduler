@@ -589,7 +589,7 @@ export interface Database {
         Args: {
           p_id: string;
           p_owner: string;
-          p_outcome: "sent" | "retry" | "failed" | "skipped";
+          p_outcome: "sent" | "retry" | "failed" | "skipped" | "deferred";
           p_error?: string | null;
           p_reason?: string | null;
           p_response?: Json | null;
