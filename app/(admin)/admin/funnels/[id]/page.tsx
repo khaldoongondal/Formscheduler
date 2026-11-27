@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formReadinessError, funnelReadinessInput, readinessConnectionFrom } from "@/lib/connections/readiness";
+import { SETUP_COPY, readinessFixHref } from "@/lib/connections/setup-state";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
 import { PROVIDERS, pickerValue, providerLabel } from "@/lib/connections/registry";
 import { listConnections, type ConnectionSummary } from "@/lib/connections/service";
@@ -241,17 +242,17 @@ export default async function FunnelDetailPage({
   const hubspotPipelines =
     crmKind === "hubspot" && funnel.crm_connection_id ? await loadHubspotPipelines(funnel.tenant_id, funnel.crm_connection_id) : null;
   const savedHubspotSettings = parseHubspotSettings(crmKind === "hubspot" ? funnel.crm_settings : null);
+  // The activation rule for the saved form (P4.3): shown at the top of section 3 for every form.
+  const formReadiness = formReadinessError(
+    funnelReadinessInput(
+      funnel,
+      selectedConnection ?? null,
+      readinessConnectionFrom(calendarConnection),
+      readinessConnectionFrom(crmConnection)
+    )
+  );
   // Active forms that cannot take bookings (for example activated before this check existed).
-  const bookingSetupWarning = funnel.is_published
-    ? formReadinessError(
-        funnelReadinessInput(
-          funnel,
-          selectedConnection ?? null,
-          readinessConnectionFrom(calendarConnection),
-          readinessConnectionFrom(crmConnection)
-        )
-      )
-    : null;
+  const bookingSetupWarning = funnel.is_published ? formReadiness : null;
   const savedCalendarValue =
     calendarKind === "ghl"
       ? funnel.ghl_connection_id ? pickerValue("ghl", funnel.ghl_connection_id) : ""
@@ -430,7 +431,7 @@ export default async function FunnelDetailPage({
             <Metric
               label="Calls booked"
               value={analytics?.callsBookedCount ?? 0}
-              helper="Booked in GHL"
+              helper="Booked through this form"
             />
             <Metric
               label="Visitor to booked"
@@ -582,7 +583,7 @@ export default async function FunnelDetailPage({
                 <SettingsGroup
                   icon={<CalendarClock className="h-4 w-4" />}
                   title="2. Booking result"
-                  description="Controls what happens after someone chooses a time and how the appointment/opportunity appears in GHL."
+                  description="Controls what happens after someone chooses a time and how the booking appears in your calendar and CRM."
                 >
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
@@ -601,10 +602,10 @@ export default async function FunnelDetailPage({
                         label="Appointment title override"
                         name="appointment_title"
                         defaultValue={funnel.appointment_title}
-                        placeholder="Use GHL meeting invite title"
+                        placeholder="Use the calendar's own meeting title"
                       />
                       <p className="text-xs leading-5 text-slate-500">
-                        Leave blank to use the meeting invite title configured on the GHL calendar.
+                        Leave blank to use the meeting title set on the calendar.
                       </p>
                     </div>
                   </div>
@@ -630,6 +631,29 @@ export default async function FunnelDetailPage({
                   title={CONNECTIONS_COPY.editorSectionTitle}
                   description={CONNECTIONS_COPY.editorSectionDescription}
                 >
+                  {formReadiness ? (
+                    <div
+                      className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between"
+                      role="status"
+                    >
+                      <p>{formReadiness}</p>
+                      <a
+                        href={readinessFixHref(
+                          formReadiness,
+                          funnel,
+                          { hasCalendarChoices: calendarPickerOptions.length > 0, hasCrmChoices: crmPickerOptions.length > 0 }
+                        )}
+                        className="shrink-0 font-semibold underline underline-offset-2"
+                      >
+                        {SETUP_COPY.fixThis}
+                      </a>
+                    </div>
+                  ) : (
+                    <p className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status">
+                      <CheckCircle2 className="h-4 w-4" />
+                      {SETUP_COPY.ready}
+                    </p>
+                  )}
                   <ConnectionPickers
                     calendarOptions={calendarPickerOptions}
                     crmOptions={crmPickerOptions}
@@ -812,7 +836,7 @@ export default async function FunnelDetailPage({
           <Card id="questions">
             <CardHeader>
               <SectionTitle icon={<ListChecks className="h-5 w-5" />} title="Question flow" />
-              <CardDescription>Questions render in order on the public funnel. Stable keys keep future GHL field mapping clean.</CardDescription>
+              <CardDescription>Questions render in order on the public funnel. Stable keys keep CRM field mapping clean.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <QuestionForm tenantId={funnel.tenant_id} funnelId={funnel.id} nextOrder={orderedQuestions.length + 1} />
@@ -1083,7 +1107,7 @@ export default async function FunnelDetailPage({
                   })}
                 </div>
                 <p className="mt-3 text-xs leading-5 text-slate-500">
-                  At least phone number or email must stay selected so the lead can be created and handed to GHL.
+                  At least phone number or email must stay selected so the lead can be created and sent to your CRM.
                 </p>
               </div>
 
@@ -1131,7 +1155,7 @@ export default async function FunnelDetailPage({
               </section>
               <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-slate-950">GHL split-test iframe snippets</h3>
+                  <h3 className="text-sm font-semibold text-slate-950">GoHighLevel split-test iframe snippets</h3>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
                     Use the Control snippet in the control popup and the Variation snippet in the variation popup. Both use this same funnel and calendar, but analytics are tagged separately.
                   </p>
@@ -1612,7 +1636,7 @@ function QuestionDisqualificationSettings({
         <span>
           <span className="block font-semibold">Disqualify leads when this answer matches</span>
           <span className="mt-1 block leading-5 text-amber-900">
-            Matching leads will not see the calendar and will move to the configured disqualified GHL stage.
+            Matching leads will not see the calendar and are sent to your CRM as disqualified (in GoHighLevel, moved to the disqualified stage you set).
           </span>
         </span>
       </label>
@@ -1753,7 +1777,7 @@ function SplitTestPerformanceTable({ rows }: { rows: SplitVariantPerformanceRow[
         </div>
       ) : (
         <p className="px-4 py-5 text-sm leading-6 text-slate-500">
-          No split-test traffic yet. Paste the Control and Variation snippets into the matching GHL popups to start tracking this.
+          No split-test traffic yet. Paste the Control and Variation snippets into the matching GoHighLevel popups to start tracking this.
         </p>
       )}
     </section>

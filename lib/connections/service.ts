@@ -7,7 +7,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
 import { isUuid } from "@/lib/connections/registry";
-import type { ConnectionStatus, GenericProvider } from "@/lib/connections/types";
+import type { CalendarKind, ConnectionStatus, CrmKind, GenericProvider } from "@/lib/connections/types";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Connection } from "@/lib/types/database";
 
@@ -234,6 +234,34 @@ export async function listFormsUsingConnection(
     throw new Error(error.message);
   }
   return (data ?? []).map((row) => ({ id: row.id as string, name: row.name as string, isPublished: Boolean(row.is_published) }));
+}
+
+export type FormConnectionRow = {
+  id: string;
+  ghl_connection_id: string | null;
+  calendar_id: string | null;
+  calendar_provider?: CalendarKind;
+  calendar_connection_id?: string | null;
+  crm_provider?: CrmKind;
+  crm_connection_id?: string | null;
+};
+
+/**
+ * The connection columns of every form of this tenant, for "Used by {n}
+ * forms" on the Connections page. Before migration 0029 only the GoHighLevel
+ * column exists.
+ */
+export async function listFormConnectionColumns(tenantId: string): Promise<FormConnectionRow[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("funnels")
+    .select("id,ghl_connection_id,calendar_id,calendar_provider,calendar_connection_id,crm_provider,crm_connection_id")
+    .eq("tenant_id", tenantId);
+  if (!error) return (data ?? []) as FormConnectionRow[];
+  if (error.code !== "42703") throw new Error(error.message);
+  const legacy = await supabase.from("funnels").select("id,ghl_connection_id,calendar_id").eq("tenant_id", tenantId);
+  if (legacy.error) throw new Error(legacy.error.message);
+  return (legacy.data ?? []) as FormConnectionRow[];
 }
 
 /**

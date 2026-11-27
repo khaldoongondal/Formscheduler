@@ -11,12 +11,19 @@ import {
   ActionSuccess,
   Field,
   GenericConnectionCard,
+  HelpLink,
   SavedBadge
 } from "@/app/(admin)/admin/connections/connection-ui";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
 import { PROVIDERS, type ProviderKind } from "@/lib/connections/registry";
-import { listConnections, type ConnectionSummary } from "@/lib/connections/service";
+import {
+  listConnections,
+  listFormConnectionColumns,
+  type ConnectionSummary,
+  type FormConnectionRow
+} from "@/lib/connections/service";
+import { SETUP_COPY, countFormsByConnection, HELP_PAGE_PATH } from "@/lib/connections/setup-state";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { listGhlConnections } from "@/lib/ghl/connections";
 import { isGhlOauthConfigured } from "@/lib/ghl/oauth";
@@ -60,14 +67,21 @@ export default async function ConnectionsPage({
   }
 
   const tenantId = await getAdminTenantId();
-  const [connections, genericConnections] = await Promise.all([
+  const [connections, genericConnections, formColumns] = await Promise.all([
     listGhlConnections(tenantId),
     // Empty before migration 0029.
     listConnections(tenantId).catch((error: unknown): ConnectionSummary[] => {
       console.error("[connections] list failed", error instanceof Error ? error.message : "unknown error");
       return [];
+    }),
+    // Only feeds the "Used by" counts; a failure hides them.
+    listFormConnectionColumns(tenantId).catch((error: unknown): FormConnectionRow[] | null => {
+      console.error("[connections] form usage failed", error instanceof Error ? error.message : "unknown error");
+      return null;
     })
   ]);
+  const formCounts = formColumns ? countFormsByConnection(formColumns) : null;
+  const formCountOf = (id: string) => (formCounts ? formCounts.get(id) ?? 0 : undefined);
   const oauthAvailable = isGhlOauthConfigured();
   const googleAvailable = isGoogleOauthConfigured();
   const query = searchParams ? await searchParams : {};
@@ -119,6 +133,9 @@ export default async function ConnectionsPage({
                         Connected via GoHighLevel sign-in
                       </span>
                     ) : null}
+                    {formCountOf(connection.id) !== undefined ? (
+                      <span className="text-xs text-slate-500">{SETUP_COPY.usedBy(formCountOf(connection.id) ?? 0)}</span>
+                    ) : null}
                   </div>
                   <Field label="Name" name="name" defaultValue={connection.name} />
                   <Field label="Location ID" name="location_id" defaultValue={connection.location_id} />
@@ -167,12 +184,15 @@ export default async function ConnectionsPage({
             </Card>
           ))}
           {calendarConnections.map((connection) => (
-            <GenericConnectionCard key={connection.id} connection={connection} />
+            <GenericConnectionCard key={connection.id} connection={connection} formCount={formCountOf(connection.id)} />
           ))}
           {connections.length === 0 && calendarConnections.length === 0 ? (
-            <Card>
-              <CardContent className="p-6 text-sm text-slate-600">{CONNECTIONS_COPY.noCalendars}</CardContent>
-            </Card>
+            <EmptyRole
+              message={CONNECTIONS_COPY.noCalendars}
+              providers={addableProviders.filter((kind) => PROVIDERS[kind].roles.includes("calendar"))}
+              googleAvailable={googleAvailable}
+              ghlHref={oauthAvailable ? "/api/connect/start" : "#add-ghl"}
+            />
           ) : null}
         </div>
 
@@ -182,12 +202,15 @@ export default async function ConnectionsPage({
         <p className="mb-3 text-sm text-slate-600">{CONNECTIONS_COPY.ghlAlsoCrm}</p>
         <div className="grid gap-4">
           {crmConnections.map((connection) => (
-            <GenericConnectionCard key={connection.id} connection={connection} />
+            <GenericConnectionCard key={connection.id} connection={connection} formCount={formCountOf(connection.id)} />
           ))}
           {connections.length === 0 && crmConnections.length === 0 ? (
-            <Card>
-              <CardContent className="p-6 text-sm text-slate-600">{CONNECTIONS_COPY.noCrms}</CardContent>
-            </Card>
+            <EmptyRole
+              message={CONNECTIONS_COPY.noCrms}
+              providers={addableProviders.filter((kind) => PROVIDERS[kind].roles.includes("crm"))}
+              googleAvailable={googleAvailable}
+              ghlHref={oauthAvailable ? "/api/connect/start" : "#add-ghl"}
+            />
           ) : null}
         </div>
       </section>
@@ -198,7 +221,12 @@ export default async function ConnectionsPage({
           <CardDescription>{CONNECTIONS_COPY.addDescription}</CardDescription>
         </CardHeader>
         <CardContent>
-          <h3 className="mb-3 text-sm font-semibold text-slate-950">{CONNECTIONS_COPY.ghlSubheading}</h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 id="add-ghl" className="scroll-mt-24 text-sm font-semibold text-slate-950">
+              {CONNECTIONS_COPY.ghlSubheading}
+            </h3>
+            <HelpLink kind="ghl" className="text-xs" />
+          </div>
           {oauthAvailable ? (
             <div className="mb-6">
               <Button asChild className="w-full">
@@ -249,8 +277,46 @@ export default async function ConnectionsPage({
               )}
             </div>
           ) : null}
+          <p className="mt-6 border-t border-slate-100 pt-4 text-sm">
+            <Link href={HELP_PAGE_PATH} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-600 underline underline-offset-2 hover:text-slate-950">
+              {SETUP_COPY.helpLink}
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/** Empty calendars or CRMs section, with the ways to add one (P4.3). */
+function EmptyRole({
+  message,
+  providers,
+  googleAvailable,
+  ghlHref
+}: {
+  message: string;
+  providers: ProviderKind[];
+  googleAvailable: boolean;
+  ghlHref: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-6">
+        <p className="text-sm text-slate-600">{message}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a href={ghlHref}>Connect GoHighLevel</a>
+          </Button>
+          {providers
+            .filter((kind) => kind !== "google_calendar" || googleAvailable)
+            .map((kind) => (
+              <Button key={kind} asChild variant="outline" size="sm">
+                <a href={PROVIDERS[kind].addHref ?? "/admin/connections"}>{ADD_LABELS[kind] ?? PROVIDERS[kind].label}</a>
+              </Button>
+            ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

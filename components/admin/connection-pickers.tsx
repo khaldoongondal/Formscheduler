@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
 import { PROVIDERS, parsePickerValue } from "@/lib/connections/registry";
+import { SETUP_COPY, helpHref } from "@/lib/connections/setup-state";
 import type { CalendarKind, CrmKind } from "@/lib/connections/types";
 
 type PickerOption<Kind extends string> = { value: string; label: string; provider: Kind; note: string | null };
@@ -75,6 +76,14 @@ export function ConnectionPickers({
     const needsSave = selected && changed && panelsNeedingSave.includes(kind);
     return (
       <fieldset key={kind} disabled={!selected} hidden={!selected} className="space-y-4">
+        <a
+          href={helpHref(kind)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block text-xs font-medium text-slate-600 underline underline-offset-2 hover:text-slate-950"
+        >
+          {SETUP_COPY.helpLink}
+        </a>
         {needsSave ? (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             {CONNECTIONS_COPY.saveToLoad}

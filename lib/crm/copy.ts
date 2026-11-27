@@ -36,3 +36,24 @@ export const DELIVERIES_COPY = {
     blocked_address: "The address is not allowed."
   } as Record<string, string>
 } as const;
+
+/** The lead detail page cards (P4.6). */
+export const LEAD_DETAIL_COPY = {
+  deliveriesHeading: "CRM deliveries",
+  deliveriesEmpty: "No CRM events have been sent for this lead.",
+  deliveriesNote: "Forms on a GoHighLevel calendar send leads to GoHighLevel directly, so they have no rows here.",
+  connectionColumn: "Connection",
+  removedConnection: "Removed connection",
+  openLog: "Delivery log",
+  bookingsHeading: "Bookings",
+  bookingsEmpty: "No booking attempts for this lead yet.",
+  bookingColumns: { time: "Meeting time", calendar: "Calendar", status: "Status", meeting: "Meeting link" },
+  bookingStatusLabels: {
+    pending: "In progress",
+    booked: "Booked",
+    error: "Failed",
+    cancelled: "Cancelled"
+  } as Record<string, string>,
+  openMeeting: "Open",
+  notScheduled: "No time"
+} as const;

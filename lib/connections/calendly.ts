@@ -223,7 +223,8 @@ export async function recordCalendlyBooking(input: {
   invitee: CalendlyInvitee;
   source: "client" | "webhook";
 }): Promise<{ attempt: BookingAttempt | null; metaEvents: Array<QueuedMetaEvent | null> }> {
-  const { funnel, session, connectionId, invitee, source } = input;
+  const { funnel, connectionId, invitee, source } = input;
+  let session = input.session;
   const supabase = createServiceClient();
   const timezone = invitee.timezone ?? "UTC";
   const { data: attempt, error } = await supabase
@@ -256,6 +257,16 @@ export async function recordCalendlyBooking(input: {
       .maybeSingle();
     if (existing) return { attempt: null, metaEvents: [] };
     console.error("[calendly] booking recorded without attempt row");
+    // No row guards this lead, so the other confirmation source may already have recorded it:
+    // read the current status so the recorder's booked-once rule sees it (P4.5 item 4).
+    const { data: fresh, error: freshError } = await supabase
+      .from("lead_sessions")
+      .select("*")
+      .eq("id", session.id)
+      .eq("tenant_id", session.tenant_id)
+      .maybeSingle();
+    if (freshError) throw new Error(freshError.message);
+    if (fresh) session = fresh as LeadSession;
   }
 
   const recorder = createOutcomeRecorder();

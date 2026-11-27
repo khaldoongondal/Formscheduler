@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { createCalendlyConnectionAction } from "@/app/(admin)/admin/connections/actions";
-import { ActionError } from "@/app/(admin)/admin/connections/connection-ui";
+import { ActionError, HelpLink } from "@/app/(admin)/admin/connections/connection-ui";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { CALENDLY_COPY } from "@/lib/calendly/constants";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
@@ -27,6 +27,7 @@ export default async function NewCalendlyConnectionPage({ searchParams }: { sear
         <CardHeader>
           <CardTitle>{CALENDLY_COPY.createHeading}</CardTitle>
           <CardDescription>{CALENDLY_COPY.createIntro}</CardDescription>
+          <HelpLink kind="calendly" className="mt-2" />
         </CardHeader>
         <CardContent className="space-y-4">
           <form action={createCalendlyConnectionAction} className="space-y-4">

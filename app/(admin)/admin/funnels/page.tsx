@@ -6,6 +6,9 @@ import { getTenantPlanSummary } from "@/lib/billing/plan-service";
 import { SUSPENDED_MESSAGE, draftLimitMessage } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { listFunnels } from "@/lib/funnels/service";
+import { listConnections, type ConnectionSummary } from "@/lib/connections/service";
+import { SETUP_COPY, formSetupError } from "@/lib/connections/setup-state";
+import { listGhlConnections } from "@/lib/ghl/connections";
 import { getRunningTestsByFunnel } from "@/lib/split-tests/service";
 import { PlanUsage } from "@/components/admin/plan-usage";
 import { SetupRequired } from "@/components/setup/setup-required";
@@ -27,18 +30,24 @@ export default async function FunnelsPage({
     return (
       <SetupRequired
         title="Supabase is required for the admin dashboard."
-        description="The admin dashboard reads tenant membership, funnels, GHL connections, and analytics from Supabase. The static homepage can load without these values, but admin pages cannot."
+        description="The admin dashboard reads tenant membership, funnels, connections, and analytics from Supabase. The static homepage can load without these values, but admin pages cannot."
         missingEnv={missingEnv}
       />
     );
   }
 
   const tenantId = await getAdminTenantId();
-  const [funnels, planSummary, runningTests] = await Promise.all([
+  const [funnels, planSummary, runningTests, ghlConnections, connections] = await Promise.all([
     listFunnels(tenantId),
     getTenantPlanSummary(tenantId),
-    getRunningTestsByFunnel(tenantId)
+    getRunningTestsByFunnel(tenantId),
+    // The two lists feed the "Needs setup" badges only; no provider is called.
+    listGhlConnections(tenantId).catch((): Array<{ id: string; calendar_id: string | null; is_active: boolean }> | null => null),
+    // Empty before migration 0029.
+    listConnections(tenantId).catch((): ConnectionSummary[] => [])
   ]);
+  const needsSetup = (funnel: (typeof funnels)[number]) =>
+    ghlConnections ? formSetupError(funnel, ghlConnections, connections) !== null : false;
   const query = searchParams ? await searchParams : {};
   const actionError = typeof query.error === "string" ? query.error : null;
   const actionSuccess = query.saved === "deleted" ? "Funnel deleted." : null;
@@ -58,7 +67,7 @@ export default async function FunnelsPage({
           <p className="text-sm font-semibold text-emerald-700">Funnels</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Booking funnels</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Choose a funnel to manage its questions, GHL handoff, theme, booking links, and performance.
+            Choose a funnel to manage its questions, calendar and CRM, theme, booking links, and performance.
           </p>
         </div>
         {isSuspended ? null : draftsFull ? (
@@ -98,6 +107,7 @@ export default async function FunnelsPage({
                   <StatusBadge published={funnel.is_published} />
                   {funnel.taken_down_at ? <TakenDownBadge /> : null}
                   {runningTests.has(funnel.id) ? <SplitTestBadge /> : null}
+                  {needsSetup(funnel) ? <NeedsSetupBadge /> : null}
                 </div>
                 <p className="mt-1 text-sm text-slate-500">/{funnel.slug}</p>
                 {funnel.description ? (
@@ -128,7 +138,7 @@ export default async function FunnelsPage({
           <Card>
             <CardContent className="p-8 text-center">
               <h2 className="text-lg font-semibold text-slate-950">No funnels yet</h2>
-              <p className="mt-2 text-sm text-slate-600">Create your first booking funnel, then configure its flow and GHL handoff.</p>
+              <p className="mt-2 text-sm text-slate-600">Create your first booking funnel, then choose its calendar and CRM.</p>
             </CardContent>
           </Card>
         ) : null}
@@ -142,7 +152,7 @@ function CreateFunnelCard({ canCancel, blockedMessage }: { canCancel: boolean; b
     <Card id="create-funnel" className="max-w-3xl scroll-mt-24">
         <CardHeader>
           <CardTitle>Create funnel</CardTitle>
-          <CardDescription>Start with the essentials. Theme, GHL, questions, and analytics live inside the funnel workspace.</CardDescription>
+          <CardDescription>Start with the essentials. Theme, calendar and CRM, questions, and analytics live inside the funnel workspace.</CardDescription>
         </CardHeader>
         <CardContent>
           {blockedMessage ? (
@@ -220,6 +230,10 @@ function StatusBadge({ published }: { published: boolean }) {
 
 function SplitTestBadge() {
   return <span className="rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">In split test</span>;
+}
+
+function NeedsSetupBadge() {
+  return <span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{SETUP_COPY.needsSetup}</span>;
 }
 
 function TakenDownBadge() {

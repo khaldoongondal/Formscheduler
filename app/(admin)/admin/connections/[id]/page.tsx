@@ -15,7 +15,7 @@ import { CALENDLY_COPY } from "@/lib/calendly/constants";
 import { HUBSPOT_COPY } from "@/lib/hubspot/constants";
 import { WEBHOOK_COPY } from "@/lib/webhooks/copy";
 import { createServiceClient } from "@/lib/supabase/server";
-import { ActionError, ActionSuccess, ConnectionStatusBadge } from "@/app/(admin)/admin/connections/connection-ui";
+import { ActionError, ActionSuccess, ConnectionStatusBadge, HelpLink } from "@/app/(admin)/admin/connections/connection-ui";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { CALCOM_COPY } from "@/lib/calcom/constants";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
@@ -106,7 +106,10 @@ export default async function ConnectionDetailPage({
           <h1 className="text-2xl font-semibold tracking-tight text-slate-950">{connection.name}</h1>
           <ConnectionStatusBadge status={connection.status} />
         </div>
-        <p className="mt-1 text-sm text-slate-600">{providerLabel(connection.provider)}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <p className="text-sm text-slate-600">{providerLabel(connection.provider)}</p>
+          <HelpLink kind={connection.provider} />
+        </div>
         {connection.status === "needs_attention" && connection.statusMessage ? (
           <p className="mt-2 text-sm text-amber-800">{connection.statusMessage}</p>
         ) : null}

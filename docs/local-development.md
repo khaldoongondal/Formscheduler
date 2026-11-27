@@ -5,7 +5,7 @@ This guide gets Leadder Scheduler fully visible with real Supabase data and safe
 ## What You Will Have
 
 - Admin dashboard: `http://localhost:3000/admin/funnels`
-- GHL connection admin: `http://localhost:3000/admin/ghl-connections`
+- Connections admin (calendars and CRMs): `http://localhost:3000/admin/connections` (the old `/admin/ghl-connections` address redirects here)
 - Public demo funnel: `http://localhost:3000/book/demo-consultation`
 - Iframe demo funnel: `http://localhost:3000/embed/demo-consultation`
 - Demo tenant ID: `00000000-0000-0000-0000-000000000001`
@@ -152,7 +152,7 @@ Open:
 
 - Homepage: `http://localhost:3000`
 - Admin: `http://localhost:3000/admin/funnels`
-- GHL connections: `http://localhost:3000/admin/ghl-connections`
+- Connections: `http://localhost:3000/admin/connections`
 - Public funnel: `http://localhost:3000/book/demo-consultation`
 - Embed funnel: `http://localhost:3000/embed/demo-consultation`
 

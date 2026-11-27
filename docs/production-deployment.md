@@ -4,6 +4,130 @@ FormBook is a tool from Gondal Tech. Production address after the move: `https:/
 
 Pushing `main` deploys production on Vercel. Production has no staging copy, so follow the checklist below in order and do not skip the backup.
 
+## Sprint 3 release checklist
+
+Sprint 3 splits what GoHighLevel did into two roles. Each form now books into one calendar (GoHighLevel, Google Calendar, Cal.com or Calendly) and sends its leads to one CRM (GoHighLevel, HubSpot or a signed webhook for n8n, Zapier, Make and others). Existing forms stay on GoHighLevel for both roles and keep working as before. The admin page `/admin/ghl-connections` becomes `/admin/connections` (the old address redirects). Follow the steps in order.
+
+### 1. Back up production first
+
+Supabase dashboard: Database, Backups, take a manual backup (or `pg_dump` the production database and keep the file somewhere safe).
+
+### 2. Apply the migrations in order
+
+If the Sprint 2 migrations (`0025` to `0028`) are not applied yet, apply them first with the Sprint 2 checklist below. Then run, in order:
+
+- `0029_connections.sql` (generic connections, calendar and CRM choice per form, lead reference, booking attempt provider columns). Adding `lead_sessions.external_ref` rewrites that table once.
+- `0030_calendar_booking_guard.sql` (one FormBook booking per calendar connection and start time).
+- `0031_crm_deliveries.sql` (the CRM delivery queue and log, one booking row per Calendly invitee).
+
+Each file is additive and safe to run twice. After all three:
+
+```sql
+select calendar_provider, crm_provider, count(*) from public.funnels group by 1, 2;   -- existing rows: ghl / ghl
+select count(*) from public.lead_sessions where external_ref is null;                 -- 0
+select relname, relrowsecurity from pg_class
+where oid in ('public.connections'::regclass, 'public.crm_event_deliveries'::regclass);   -- both true
+select grantee, table_name, privilege_type from information_schema.role_table_grants
+where table_schema = 'public' and table_name in ('connections', 'crm_event_deliveries')
+  and grantee in ('anon', 'authenticated');   -- no rows
+select p.proname, r.rolname from pg_proc p cross join pg_roles r
+where p.pronamespace = 'public'::regnamespace and r.rolname in ('anon', 'authenticated')
+  and p.proname in ('claim_crm_deliveries', 'claim_crm_deliveries_by_ids', 'settle_crm_delivery', 'release_crm_delivery',
+    'retry_crm_delivery', 'crm_housekeeping', 'enforce_connection_cap', 'enforce_funnel_generic_connections')
+  and has_function_privilege(r.rolname, p.oid, 'execute');   -- no rows
+select indexname from pg_indexes
+where indexname in ('booking_attempts_connection_slot_uidx', 'booking_attempts_connection_external_uidx',
+                    'crm_event_deliveries_target_event_uidx');   -- 3 rows
+```
+
+### 3. Vercel production environment variables
+
+- `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` from step 4. Until both are set, the Connect Google Calendar button is hidden.
+- `FORMBOOK_EXTRA_APP_ORIGINS=https://app.formbook.ca` while both addresses serve the app, so Google sign-ins can start from either.
+- `FORMBOOK_SUPPORT_EMAIL`: the contact address shown on `/help/connections` (the line is hidden when empty).
+- `NEXT_PUBLIC_APP_URL` must be the final https address before any customer connects Calendly: Calendly booking notifications are sent there. After a later address change, each Calendly connection needs `Set up confirmations` again.
+- `CRON_SECRET` (from Sprint 2) also protects `/api/cron/crm-events`. `LEADDER_TOKEN_ENCRYPTION_KEY` stays unchanged: every new token and secret is encrypted with it.
+
+### 4. Google Cloud (owner, in person)
+
+1. Create a Google Cloud project for FormBook and enable the Google Calendar API.
+2. OAuth consent screen: user type External; app name FormBook; support email and developer contact: the owner's Gondal Tech address; home page, privacy policy and terms links on `https://formbooking.gondaltech.app` (`/`, `/privacy`, `/terms`); authorised domains `gondaltech.app`, plus `formbook.ca` during the switch.
+3. Scopes: `openid`, `email`, `https://www.googleapis.com/auth/calendar.freebusy`, `https://www.googleapis.com/auth/calendar.events.owned`. Write down the class Google shows for each scope (sensitive or restricted); FormBook assumes both calendar scopes are sensitive (unverified point U1).
+4. Credentials: OAuth client, type Web application, with these authorised redirect URIs:
+   - `https://formbooking.gondaltech.app/api/connect/google/callback`
+   - `https://app.formbook.ca/api/connect/google/callback`
+5. While the app is in Testing, add the Google accounts that may connect as test users. In Testing, only those accounts can connect and Google may expire their access after 7 days (U6), so customers cannot rely on it yet.
+6. Submit for verification with this justification: "FormBook reads free and busy times to offer open meeting times on the customer's booking form and creates the booked meeting on the customer's own calendar." Attach a demo video showing: connecting Google Calendar, setting working hours, a booking on a form, and the event in Google Calendar. Verification can take weeks.
+
+### 5. Calendly, Cal.com and HubSpot
+
+Nothing to register: each customer pastes their own token. Calendly needs `NEXT_PUBLIC_APP_URL` set correctly (step 3).
+
+### 6. Vercel crons
+
+`vercel.json` schedules two 5-minute crons: `/api/cron/meta-events` and `/api/cron/crm-events`. Confirm the plan allows both (U22). If it allows only one, call the CRM drain from the Meta cron instead. After the deploy, the Cron Jobs tab shows both returning 200.
+
+### 7. Deploy
+
+Run the smoke tests below on the demo Gondal Tech account with test forms only, never on a customer's form. Record the result of every unverified point (U1 to U24 in the internal Sprint 3 notes) next to its step.
+
+### 8. Smoke tests
+
+GoHighLevel (nothing may change for existing forms):
+
+- R1. An existing GoHighLevel form captures a lead (contact and opt-in opportunity as before), the answers sync, times load, and booking creates the appointment and moves the opportunity.
+- R2. Connect GoHighLevel with one-click sign-in: it lands on Connections with the success message. Opening `/admin/ghl-connections` redirects to `/admin/connections`.
+- R3. Add a GoHighLevel connection by hand with a private integration token and save it.
+- R4. Deleting a GoHighLevel connection that an Active form uses is refused with the list of forms.
+
+Google Calendar:
+
+- G1. Connect Google Calendar: the consent screen asks for the two calendar permissions only (U1).
+- G2. Save working hours on the connection.
+- G3. The form's times equal the working hours minus a test busy event; set 60 days ahead and check the last days load (U2, U7).
+- G4. Book with "Add a Google Meet link" on: the event is on the primary calendar with the lead as guest and a Meet link (U3).
+- G5. Double click the booking button, and book the same time from two browsers: one booking and one "That time was just taken" message (U4).
+- G6. Delete the connection: Google shows FormBook's access removed from the account (U5).
+
+Cal.com:
+
+- C1. Add a Cal.com API key.
+- C2. The form editor lists the account's event types (U9).
+- C3. The form shows Cal.com's open times (U11).
+- C4. A booking appears in Cal.com with the lead as attendee (U8).
+- C5. A lead with a phone number and no email books successfully (U10).
+
+Calendly:
+
+- K1. On a free Calendly account, connect with a token that has exactly the scopes listed on the help page; booking confirmations show "Set up" (U12, U16).
+- K2. The last form step shows Calendly's page with the name and email filled in (U14, U24).
+- K3. Book in Calendly: the lead shows Booked once, the booking row exists once, and the CRM receives one `lead.booked`; the lead was matched by its reference, not its email (U13, U15).
+- K4. Cancel the booking in Calendly: the booking row shows Cancelled.
+
+HubSpot:
+
+- H1. Add a HubSpot private app token; the connection shows the portal (U17, U18, U21).
+- H2. A lead creates a contact with a note holding the answers and tracking details (U20).
+- H3. With deals on, a lead creates a deal at the new-lead stage and booking moves it to the booked stage (U19).
+- H4. A lead with a phone number and no email creates or updates a contact.
+
+Webhook:
+
+- W1. Point a webhook at a request inspector or an n8n Webhook node and choose Send test: `test.ping` arrives and its `X-FormBook-Signature` verifies with the help page snippet.
+- W2. A lead's `lead.captured`, `lead.qualified` and `lead.booked` arrive in that order (U23).
+- W3. An endpoint that answers 500 shows retries in the delivery log.
+- W4. Saving `http://` and a private address (for example `https://10.0.0.1/hook`) is refused.
+
+Consistency across calendars:
+
+- On the split test results page and a form's Performance card, leads and bookings from a Google Calendar form and a Calendly form count the same way as GoHighLevel ones.
+- The Meta event log shows one booked call (`Schedule`) for each booking, including Calendly bookings confirmed by both the page and the notification.
+- The lead's page shows the booking with its calendar and meeting link, and its CRM deliveries.
+
+### 9. Rollback
+
+Forms can be switched back to a GoHighLevel calendar in the form editor. The migrations are additive, so no database rollback is needed. To stop all CRM sending at once, switch off the HubSpot and webhook connections: queued events are skipped and stay in the delivery log.
+
 ## Sprint 2 release checklist
 
 Sprint 2 adds split tests, split test results and ad spend, Meta pixels with server-side events (Conversions API), the Meta event log and match quality view, and a demo seed script. Follow the steps in order.
@@ -356,7 +480,7 @@ For a project that still had plaintext GoHighLevel tokens:
 1. Set `LEADDER_TOKEN_ENCRYPTION_KEY`.
 2. Deploy the code.
 3. Apply `0005_security_hardening.sql`.
-4. Re-enter every GoHighLevel token in `/admin/ghl-connections`.
+4. Re-enter every GoHighLevel token in `/admin/connections`.
 5. Verify stored token values begin with `v1:`.
 
 ## Row level security
@@ -365,7 +489,7 @@ The app talks to Postgres only through the service-role client. Tenant tables ha
 
 ## GoHighLevel setup
 
-Customers connect GoHighLevel from `/admin/ghl-connections`, either with the one-click marketplace app (OAuth) or with a Private Integration Token.
+Customers connect GoHighLevel from `/admin/connections`, either with the one-click marketplace app (OAuth) or with a Private Integration Token.
 
 For a Private Integration Token:
 
@@ -377,7 +501,7 @@ For a Private Integration Token:
    - `calendars.readonly`
    - `calendars/events.write`
 3. Record the location ID, calendar ID, opt-in pipeline and stage IDs, and booked-call pipeline and stage IDs.
-4. Add the connection in `/admin/ghl-connections`.
+4. Add the connection in `/admin/connections`.
 5. Configure each form with its own connection, calendar, pipeline stages and appointment title. A form can only use a connection from its own account.
 6. Run the live validation plan in `docs/ghl-live-test-plan.md`.
 

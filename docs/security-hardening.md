@@ -18,7 +18,7 @@ Storage behavior:
 - New and updated GHL tokens are encrypted with AES-256-GCM.
 - The stored value uses a versioned envelope: `v1:<iv>:<tag>:<ciphertext>`.
 - Decryption only happens server-side in `lib/ghl/connections.ts` when building a GHL runtime config.
-- Legacy plaintext values are rejected. Rotate each existing GHL token through `/admin/ghl-connections` after setting `LEADDER_TOKEN_ENCRYPTION_KEY`.
+- Legacy plaintext values are rejected. Rotate each existing GoHighLevel token through `/admin/connections` after setting `LEADDER_TOKEN_ENCRYPTION_KEY`.
 
 Migration steps:
 
@@ -62,7 +62,7 @@ Helper functions:
 Application role model:
 
 - `owner`: full tenant access, including member management by RLS policy.
-- `admin`: can create, update, duplicate, publish, and delete funnels and GHL connections.
+- `admin`: can create, update, duplicate, publish, and delete funnels and connections (calendars and CRMs).
 - `member`: can view admin pages and analytics, but cannot mutate tenant configuration.
 
 Server actions and admin API writes call `requireTenantRole(["owner", "admin"])`.

@@ -20,6 +20,7 @@ import { onLead, onLeadStage } from "@/lib/meta/hooks";
 import type { QueuedMetaEvent } from "@/lib/meta/queue";
 import { getClientIp, toStorableIp } from "@/lib/security/client-ip";
 import { dispatchCrmEvent } from "@/lib/crm/dispatch";
+import { leadStageMetadata } from "@/lib/bookings/outcome-plan";
 import type { Funnel, Json, LeadAnswer, LeadSession, Question } from "@/lib/types/database";
 import { startLeadSessionSchema, submitAnswersSchema } from "@/lib/validation/lead-sessions";
 import { isValidWebsiteValue, normalizeWebsiteValue, websiteValidationMessage } from "@/lib/validation/website";
@@ -270,7 +271,7 @@ async function startGenericLead(
     eventType: "lead_captured",
     sourceUrl: updatedSession.source_url ?? undefined,
     userAgent: updatedSession.user_agent ?? undefined,
-    metadata: { provider: funnel.calendar_provider ?? "ghl" }
+    metadata: leadStageMetadata(funnel.calendar_provider) ?? { provider: funnel.calendar_provider ?? "ghl" }
   });
 
   // Decision M15: Lead fires when the session reaches potential. Never throws.
@@ -596,6 +597,8 @@ export async function submitLeadAnswers(input: unknown) {
       splitTestId: syncedSession.split_test_id ?? null,
       eventType: "disqualified_lead",
       metadata: {
+        // Decision C22: rows from a non-GoHighLevel calendar carry the provider.
+        ...leadStageMetadata(funnel.calendar_provider),
         disqualifying_options: disqualifyingOptions.map((option) => ({
           stable_key: option.stable_key,
           label: option.label,
@@ -627,13 +630,16 @@ export async function submitLeadAnswers(input: unknown) {
   if (updateError) throw new Error(updateError.message);
 
   if (allRequiredAnswered) {
+    // Decision C22: rows from a non-GoHighLevel calendar carry the provider; GoHighLevel rows are unchanged.
+    const qualifiedMetadata = leadStageMetadata(funnel.calendar_provider);
     await trackEvent({
       tenantId: session.tenant_id,
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
       splitTestId: session.split_test_id ?? null,
-      eventType: "qualified_lead"
+      eventType: "qualified_lead",
+      ...(qualifiedMetadata ? { metadata: qualifiedMetadata } : {})
     });
   }
 

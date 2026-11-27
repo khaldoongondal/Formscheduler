@@ -54,6 +54,9 @@ export default function PrivacyPage() {
             "Supabase: database and sign-in.",
             "Vercel: hosting.",
             "GoHighLevel: the customer's own CRM and calendar, where leads and bookings are sent, and Gondal Tech's own CRM for account emails.",
+            "Google Calendar, Cal.com and Calendly: only when a customer connects one of them as the calendar for a form. Bookings are created in the customer's own account.",
+            "HubSpot: only when a customer connects it as the CRM for a form. Lead details are sent to the customer's own HubSpot account.",
+            "Webhook addresses: when a customer chooses a webhook as the CRM for a form, FormBook sends lead details to the web address the customer chose.",
             "Cloudflare Turnstile, when enabled: a check that a signup comes from a person and not a bot.",
             "Meta: only when a customer connects a Meta pixel to a form."
           ]}

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { createWebhookConnectionAction } from "@/app/(admin)/admin/connections/actions";
-import { ActionError } from "@/app/(admin)/admin/connections/connection-ui";
+import { ActionError, HelpLink } from "@/app/(admin)/admin/connections/connection-ui";
 import { WebhookSecretInput } from "@/app/(admin)/admin/connections/webhook-secret-input";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
@@ -28,6 +28,7 @@ export default async function NewWebhookConnectionPage({ searchParams }: { searc
         <CardHeader>
           <CardTitle>{WEBHOOK_COPY.createHeading}</CardTitle>
           <CardDescription>{WEBHOOK_COPY.createIntro}</CardDescription>
+          <HelpLink kind="webhook" className="mt-2" />
         </CardHeader>
         <CardContent>
           <form action={createWebhookConnectionAction} className="space-y-4">

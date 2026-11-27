@@ -15,7 +15,10 @@ import { listLeadDeliveries, type DeliveryListRow } from "@/lib/meta/controls";
 import { META_CONTROLS_COPY } from "@/lib/meta/log-format";
 import { isUuid } from "@/lib/meta/pixels";
 import { createServiceClient } from "@/lib/supabase/server";
-import type { LeadSession, LeadSessionStatus } from "@/lib/types/database";
+import type { CrmEventDelivery, LeadSession, LeadSessionStatus } from "@/lib/types/database";
+import type { CalendarKind } from "@/lib/connections/types";
+import { providerLabel } from "@/lib/connections/registry";
+import { DELIVERIES_COPY, LEAD_DETAIL_COPY } from "@/lib/crm/copy";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +84,93 @@ async function loadLead(tenantId: string, leadSessionId: string) {
   };
 }
 
+type LeadDeliveryRow = {
+  id: string;
+  event_type: CrmEventDelivery["event_type"];
+  status: CrmEventDelivery["status"];
+  status_reason: string | null;
+  response_status: number | null;
+  response_summary: string | null;
+  last_error: string | null;
+  connection_id: string | null;
+  ghl_connection_id: string | null;
+  created_at: string;
+};
+
+type LeadBookingRow = {
+  id: string;
+  status: string;
+  slot_start: string | null;
+  timezone: string | null;
+  created_at: string;
+  provider?: CalendarKind | null;
+  meeting_url?: string | null;
+};
+
+/** This lead's CRM delivery rows with connection names, tenant scoped. Empty before migration 0031. */
+async function loadLeadCrmDeliveries(tenantId: string, leadSessionId: string) {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("crm_event_deliveries")
+    .select("id,event_type,status,status_reason,response_status,response_summary,last_error,connection_id,ghl_connection_id,created_at")
+    .eq("tenant_id", tenantId)
+    .eq("lead_session_id", leadSessionId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) return { rows: [] as LeadDeliveryRow[], names: new Map<string, string>() };
+  const rows = (data ?? []) as LeadDeliveryRow[];
+  const genericIds = [...new Set(rows.map((row) => row.connection_id).filter((id): id is string => Boolean(id)))];
+  const ghlIds = [...new Set(rows.map((row) => row.ghl_connection_id).filter((id): id is string => Boolean(id)))];
+  const [generic, ghl] = await Promise.all([
+    genericIds.length
+      ? supabase.from("connections").select("id,name").eq("tenant_id", tenantId).in("id", genericIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null }),
+    ghlIds.length
+      ? supabase.from("ghl_connections").select("id,name").eq("tenant_id", tenantId).in("id", ghlIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string }>, error: null })
+  ]);
+  const names = new Map<string, string>();
+  for (const row of [...(generic.data ?? []), ...(ghl.data ?? [])] as Array<{ id: string; name: string }>) names.set(row.id, row.name);
+  return { rows, names };
+}
+
+/** This lead's booking attempts, tenant scoped. Before migration 0029 there is no provider or meeting link. */
+async function loadLeadBookings(tenantId: string, leadSessionId: string): Promise<LeadBookingRow[]> {
+  const supabase = createServiceClient();
+  const base = "id,status,slot_start,timezone,created_at";
+  const query = (columns: string) =>
+    supabase
+      .from("booking_attempts")
+      .select(columns)
+      .eq("tenant_id", tenantId)
+      .eq("lead_session_id", leadSessionId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+  const { data, error } = await query(`${base},provider,meeting_url`);
+  if (!error) return (data ?? []) as unknown as LeadBookingRow[];
+  if (error.code !== "42703") throw new Error(error.message);
+  const legacy = await query(base);
+  if (legacy.error) throw new Error(legacy.error.message);
+  return (legacy.data ?? []) as unknown as LeadBookingRow[];
+}
+
+function deliveryResult(row: LeadDeliveryRow) {
+  const reason = row.status_reason ? DELIVERIES_COPY.reasons[row.status_reason] ?? null : null;
+  return [row.response_status ? `HTTP ${row.response_status}` : null, row.response_summary ?? row.last_error, reason]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Only an https meeting link is rendered as a link. */
+function safeMeetingUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
@@ -123,6 +213,16 @@ export default async function LeadPage({
     loadError = "Meta events could not load. Refresh the page to try again.";
   }
   const hasHeld = rows.some((row) => row.status === "held");
+  const [crmDeliveries, bookings] = await Promise.all([
+    loadLeadCrmDeliveries(tenantId, lead.id).catch((error: unknown) => {
+      console.error("[crm] lead deliveries failed", error instanceof Error ? error.message : "unknown error");
+      return { rows: [] as LeadDeliveryRow[], names: new Map<string, string>() };
+    }),
+    loadLeadBookings(tenantId, lead.id).catch((error: unknown): LeadBookingRow[] => {
+      console.error("[bookings] lead bookings failed", error instanceof Error ? error.message : "unknown error");
+      return [];
+    })
+  ]);
 
   const query = searchParams ? await searchParams : {};
   const actionError = typeof query.error === "string" ? query.error : null;
@@ -196,6 +296,107 @@ export default async function LeadPage({
           ) : null}
         </CardContent>
       </Card>
+
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-slate-950">{LEAD_DETAIL_COPY.bookingsHeading}</h2>
+        {bookings.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-slate-300 p-6 text-sm text-slate-600">{LEAD_DETAIL_COPY.bookingsEmpty}</p>
+        ) : (
+          <Card>
+            <CardContent className="overflow-x-auto p-0">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">{LEAD_DETAIL_COPY.bookingColumns.time}</th>
+                    <th className="px-4 py-3">{LEAD_DETAIL_COPY.bookingColumns.calendar}</th>
+                    <th className="px-4 py-3">{LEAD_DETAIL_COPY.bookingColumns.status}</th>
+                    <th className="px-4 py-3">{LEAD_DETAIL_COPY.bookingColumns.meeting}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {bookings.map((booking) => {
+                    const meetingUrl = safeMeetingUrl(booking.meeting_url);
+                    return (
+                      <tr key={booking.id} className="align-top">
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                          {booking.slot_start ? formatEventTime(booking.slot_start) : LEAD_DETAIL_COPY.notScheduled}
+                        </td>
+                        <td className="px-4 py-3 text-slate-900">{providerLabel(booking.provider ?? "ghl")}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {LEAD_DETAIL_COPY.bookingStatusLabels[booking.status] ?? booking.status}
+                        </td>
+                        <td className="px-4 py-3">
+                          {meetingUrl ? (
+                            <a
+                              href={meetingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-slate-900 underline underline-offset-2"
+                            >
+                              {LEAD_DETAIL_COPY.openMeeting}
+                            </a>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-slate-950">{LEAD_DETAIL_COPY.deliveriesHeading}</h2>
+        {crmDeliveries.rows.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-slate-300 p-6 text-sm text-slate-600">
+            {LEAD_DETAIL_COPY.deliveriesEmpty} {LEAD_DETAIL_COPY.deliveriesNote}
+          </p>
+        ) : (
+          <Card>
+            <CardContent className="overflow-x-auto p-0">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">{DELIVERIES_COPY.columns.time}</th>
+                    <th className="px-4 py-3">{DELIVERIES_COPY.columns.event}</th>
+                    <th className="px-4 py-3">{LEAD_DETAIL_COPY.connectionColumn}</th>
+                    <th className="px-4 py-3">{DELIVERIES_COPY.columns.status}</th>
+                    <th className="px-4 py-3">{DELIVERIES_COPY.columns.result}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {crmDeliveries.rows.map((row) => {
+                    const connectionId = row.connection_id ?? row.ghl_connection_id;
+                    const connectionName = connectionId ? crmDeliveries.names.get(connectionId) ?? null : null;
+                    return (
+                      <tr key={row.id} className="align-top">
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatEventTime(row.created_at)}</td>
+                        <td className="px-4 py-3 text-slate-900">{DELIVERIES_COPY.eventLabels[row.event_type] ?? row.event_type}</td>
+                        <td className="px-4 py-3">
+                          {connectionId && connectionName ? (
+                            <Link
+                              href={`/admin/connections/${connectionId}/deliveries`}
+                              className="font-medium text-slate-900 underline underline-offset-2"
+                            >
+                              {connectionName}
+                            </Link>
+                          ) : (
+                            <span className="text-slate-500">{LEAD_DETAIL_COPY.removedConnection}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{DELIVERIES_COPY.statusLabels[row.status] ?? row.status}</td>
+                        <td className="max-w-[320px] break-words px-4 py-3 text-slate-600">{deliveryResult(row)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+      </section>
 
       <section className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

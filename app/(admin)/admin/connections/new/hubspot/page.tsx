@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { createHubspotConnectionAction } from "@/app/(admin)/admin/connections/actions";
-import { ActionError } from "@/app/(admin)/admin/connections/connection-ui";
+import { ActionError, HelpLink } from "@/app/(admin)/admin/connections/connection-ui";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
 import { HUBSPOT_COPY } from "@/lib/hubspot/constants";
@@ -27,6 +27,7 @@ export default async function NewHubspotConnectionPage({ searchParams }: { searc
         <CardHeader>
           <CardTitle>{HUBSPOT_COPY.createHeading}</CardTitle>
           <CardDescription>{HUBSPOT_COPY.createIntro}</CardDescription>
+          <HelpLink kind="hubspot" className="mt-2" />
         </CardHeader>
         <CardContent>
           <form action={createHubspotConnectionAction} className="space-y-4">

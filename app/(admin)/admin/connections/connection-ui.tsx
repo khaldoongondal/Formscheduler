@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp } from "lucide-react";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
-import { providerLabel } from "@/lib/connections/registry";
+import { providerLabel, type ProviderKind } from "@/lib/connections/registry";
+import { SETUP_COPY, helpHref } from "@/lib/connections/setup-state";
 import type { ConnectionSummary } from "@/lib/connections/service";
 import type { ConnectionStatus } from "@/lib/connections/types";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ export function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) 
 }
 
 /** Summary card for a calendar or CRM connection other than GoHighLevel. No secrets reach this component. */
-export function GenericConnectionCard({ connection }: { connection: ConnectionSummary }) {
+export function GenericConnectionCard({ connection, formCount }: { connection: ConnectionSummary; formCount?: number }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -38,6 +39,7 @@ export function GenericConnectionCard({ connection }: { connection: ConnectionSu
             {providerLabel(connection.provider)}
             {connection.accountLabel ? ` · ${connection.accountLabel}` : ""}
           </p>
+          {formCount !== undefined ? <p className="mt-1 text-xs text-slate-500">{SETUP_COPY.usedBy(formCount)}</p> : null}
           {connection.status === "needs_attention" && connection.statusMessage ? (
             <p className="mt-1 text-sm text-amber-800">{connection.statusMessage}</p>
           ) : null}
@@ -93,5 +95,20 @@ export function Field({
       <Label>{label}</Label>
       <Input name={name} defaultValue={defaultValue} placeholder={placeholder} />
     </div>
+  );
+}
+
+/** "How to set this up": the provider's section on the public help page. */
+export function HelpLink({ kind, className }: { kind: ProviderKind; className?: string }) {
+  return (
+    <Link
+      href={helpHref(kind)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-950 ${className ?? ""}`}
+    >
+      <CircleHelp className="h-4 w-4" />
+      {SETUP_COPY.helpLink}
+    </Link>
   );
 }

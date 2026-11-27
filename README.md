@@ -9,7 +9,7 @@ GHL remains the system of record for contacts, opportunities, pipelines, appoint
 ```text
 app/
   (admin)/admin/
-    ghl-connections/         Tenant-scoped GHL account connections
+    connections/             Calendar and CRM connections (GoHighLevel, Google Calendar, Cal.com, Calendly, HubSpot, webhook)
     funnels/                 Admin funnel and question builder
   api/
     analytics/               Event tracking endpoint
@@ -140,7 +140,7 @@ flowchart LR
 6. Open:
 
    - Admin: `http://localhost:3000/admin/funnels`
-   - GHL connections: `http://localhost:3000/admin/ghl-connections`
+   - Connections: `http://localhost:3000/admin/connections`
    - Demo funnel: `http://localhost:3000/book/demo-consultation`
    - Demo embed: `http://localhost:3000/embed/demo-consultation`
 
@@ -154,9 +154,9 @@ For detailed hosted Supabase, demo seed, and local visual QA instructions, see `
 4. Create an admin user.
 5. For multi-tenant auth, insert a `tenant_members` row linking the Supabase Auth `user_id` to a `tenant_id`.
 6. Confirm the `funnel-assets` storage bucket exists from `0003_storage.sql`.
-7. Add at least one GHL connection in `/admin/ghl-connections`.
+7. Add at least one calendar and one CRM connection in `/admin/connections`.
 8. Verify RLS policies from `0005_security_hardening.sql` are active.
-9. Rotate each GHL token through `/admin/ghl-connections` so stored values are encrypted.
+9. Rotate each GoHighLevel token through `/admin/connections` so stored values are encrypted.
 
 ## Vercel Deployment
 

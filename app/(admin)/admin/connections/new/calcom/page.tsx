@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { createCalcomConnectionAction } from "@/app/(admin)/admin/connections/actions";
-import { ActionError } from "@/app/(admin)/admin/connections/connection-ui";
+import { ActionError, HelpLink } from "@/app/(admin)/admin/connections/connection-ui";
 import { getAdminTenantId } from "@/lib/auth/tenant";
 import { CALCOM_COPY } from "@/lib/calcom/constants";
 import { CONNECTIONS_COPY } from "@/lib/connections/copy";
@@ -35,6 +35,7 @@ export default async function NewCalcomConnectionPage({
         <CardHeader>
           <CardTitle>{CALCOM_COPY.createHeading}</CardTitle>
           <CardDescription>{CALCOM_COPY.createIntro}</CardDescription>
+          <HelpLink kind="calcom" className="mt-2" />
         </CardHeader>
         <CardContent>
           <form action={createCalcomConnectionAction} className="space-y-4">
