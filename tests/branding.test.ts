@@ -39,11 +39,36 @@ function resolveAlias(spec: string): string | null {
   return null;
 }
 
+/**
+ * Internal identifiers that contain the company name but are never shown to
+ * a form visitor. They are stripped before the case-insensitive check.
+ */
+const INTERNAL_GONDAL_IDENTIFIERS = [/\buseGondalAttributionFields\b/, /\buse_gondal_attribution_fields\b/];
+const INTERNAL_GONDAL_ALLOWLIST: Record<string, RegExp[]> = {
+  // Fallback for CONTACT_EMAIL; public form files must not render CONTACT_EMAIL.
+  [path.join("lib", "billing", "plans.ts")]: [/FALLBACK_CONTACT_EMAIL = "[^"]*"/],
+  // Reserved slug words, rejected when an owner picks a form address.
+  [path.join("lib", "funnels", "slugs.ts")]: [/"gondal",/, /"gondaltech",/],
+  // Shared footer constant, only rendered on marketing, help and legal pages.
+  [path.join("lib", "marketing", "site.ts")]: [/MAKER_FOOTER_LINE = "[^"]*"/]
+};
+
+/** Source text with the allowlisted internal identifiers removed. */
+function visibleCode(file: string): string {
+  const patterns = [...INTERNAL_GONDAL_IDENTIFIERS, ...(INTERNAL_GONDAL_ALLOWLIST[path.relative(ROOT, file)] ?? [])];
+  return patterns.reduce((text, pattern) => text.replace(new RegExp(pattern.source, "g"), ""), code(file));
+}
+
 /** Every file a public form route can load, following "@/" imports. */
 function publicFormClosure(): { roots: string[]; all: string[] } {
   const roots = [
     ...["book", "embed", "t", "report", "preview"].flatMap((dir) => filesUnder(rel("app", dir))),
-    ...filesUnder(rel("components", "booking"))
+    ...filesUnder(rel("components", "booking")),
+    // Visitor-facing API routes (reached only through fetch) and the root
+    // layout and error page every form route inherits.
+    ...["bookings", "lead-sessions", "form-reports"].flatMap((dir) => filesUnder(rel("app", "api", dir))),
+    rel("app", "layout.tsx"),
+    rel("app", "error.tsx")
   ];
   const seen = new Set<string>();
   const queue = [...roots];
@@ -68,10 +93,25 @@ describe("company name on public form pages", () => {
   });
 
   it("never names Gondal Tech in any text a form visitor can see", () => {
-    // Case sensitive: internal identifiers such as useGondalAttributionFields
-    // and reserved slug words are not visible text and are allowed.
     for (const file of all) {
-      assert.doesNotMatch(code(file), /\bGondal\b/, path.relative(ROOT, file));
+      assert.doesNotMatch(visibleCode(file), /gondal/i, path.relative(ROOT, file));
+      assert.doesNotMatch(visibleCode(file), /gondaltech\.(com|app|ca)/i, path.relative(ROOT, file));
+    }
+  });
+
+  it("only allows the company name in the known internal identifiers", () => {
+    // Guards the allowlist itself: each entry must still match something,
+    // so a stale entry cannot quietly hide new text.
+    for (const [file, patterns] of Object.entries(INTERNAL_GONDAL_ALLOWLIST)) {
+      const text = code(rel(file));
+      for (const pattern of patterns) assert.match(text, pattern, `${file} ${pattern}`);
+    }
+  });
+
+  it("never uses the maker footer line on a public form page", () => {
+    for (const file of all) {
+      if (file === rel("lib", "marketing", "site.ts")) continue;
+      assert.doesNotMatch(code(file), /MAKER_FOOTER_LINE/, path.relative(ROOT, file));
     }
   });
 
