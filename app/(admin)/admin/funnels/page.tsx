@@ -6,6 +6,7 @@ import { getTenantPlanSummary } from "@/lib/billing/plan-service";
 import { SUSPENDED_MESSAGE, draftLimitMessage } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { listFunnels } from "@/lib/funnels/service";
+import { getRunningTestsByFunnel } from "@/lib/split-tests/service";
 import { PlanUsage } from "@/components/admin/plan-usage";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,11 @@ export default async function FunnelsPage({
   }
 
   const tenantId = await getAdminTenantId();
-  const [funnels, planSummary] = await Promise.all([listFunnels(tenantId), getTenantPlanSummary(tenantId)]);
+  const [funnels, planSummary, runningTests] = await Promise.all([
+    listFunnels(tenantId),
+    getTenantPlanSummary(tenantId),
+    getRunningTestsByFunnel(tenantId)
+  ]);
   const query = searchParams ? await searchParams : {};
   const actionError = typeof query.error === "string" ? query.error : null;
   const actionSuccess = query.saved === "deleted" ? "Funnel deleted." : null;
@@ -92,6 +97,7 @@ export default async function FunnelsPage({
                   <h2 className="text-lg font-semibold text-slate-950">{funnel.name}</h2>
                   <StatusBadge published={funnel.is_published} />
                   {funnel.taken_down_at ? <TakenDownBadge /> : null}
+                  {runningTests.has(funnel.id) ? <SplitTestBadge /> : null}
                 </div>
                 <p className="mt-1 text-sm text-slate-500">/{funnel.slug}</p>
                 {funnel.description ? (
@@ -210,6 +216,10 @@ function StatusBadge({ published }: { published: boolean }) {
       {published ? "Active" : "Draft"}
     </span>
   );
+}
+
+function SplitTestBadge() {
+  return <span className="rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">In split test</span>;
 }
 
 function TakenDownBadge() {

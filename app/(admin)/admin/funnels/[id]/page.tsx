@@ -49,6 +49,8 @@ import { getTenantPlanSummary } from "@/lib/billing/plan-service";
 import { activeLimitMessage } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { buildIframeSnippet, buildPopupSnippet, buildSplitTestIframeSnippet } from "@/lib/embed/snippets";
+import { SPLIT_TEST_COPY, runningTestEditorNote } from "@/lib/split-tests/rules";
+import { getRunningTestsByFunnel } from "@/lib/split-tests/service";
 import {
   contactFieldOptions,
   intakeFlowItemToKey,
@@ -128,11 +130,13 @@ export default async function FunnelDetailPage({
     from: query.from,
     to: query.to
   });
-  const [connections, analytics, planSummary] = await Promise.all([
+  const [connections, analytics, planSummary, runningTests] = await Promise.all([
     listGhlConnections(funnel.tenant_id),
     getFunnelAnalytics(funnel.id, analyticsRange),
-    getTenantPlanSummary(funnel.tenant_id)
+    getTenantPlanSummary(funnel.tenant_id),
+    getRunningTestsByFunnel(funnel.tenant_id)
   ]);
+  const runningTest = runningTests.get(funnel.id) ?? null;
   const activeLimitHint =
     !funnel.is_published && planSummary.plan && planSummary.usage.activeForms >= planSummary.plan.maxActiveForms
       ? activeLimitMessage(planSummary.plan)
@@ -197,6 +201,14 @@ export default async function FunnelDetailPage({
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{funnel.name}</h1>
             <StatusBadge published={funnel.is_published} />
             {funnel.taken_down_at ? <TakenDownBadge /> : null}
+            {runningTest ? (
+              <Link
+                href={`/admin/split-tests/${runningTest.id}`}
+                className="rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+              >
+                In split test
+              </Link>
+            ) : null}
           </div>
           <p className="mt-2 text-sm text-slate-600">/{funnel.slug}</p>
           {funnel.description ? (
@@ -361,6 +373,11 @@ export default async function FunnelDetailPage({
                     {activeLimitHint ? (
                       <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
                         {activeLimitHint}
+                      </p>
+                    ) : null}
+                    {runningTest ? (
+                      <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-900">
+                        {runningTestEditorNote(runningTest.name)}
                       </p>
                     ) : null}
                   </div>
@@ -875,6 +892,11 @@ export default async function FunnelDetailPage({
                   <Snippet label="Control popup iframe" value={controlSplitIframe} />
                   <Snippet label="Variation popup iframe" value={variationSplitIframe} />
                 </div>
+                <p className="mt-4 text-sm leading-6 text-slate-600">
+                  <Link href="/admin/split-tests#create-test" className="font-semibold text-primary hover:underline">
+                    {SPLIT_TEST_COPY.editorEmbedNote}
+                  </Link>
+                </p>
               </section>
             </CardContent>
           </Card>

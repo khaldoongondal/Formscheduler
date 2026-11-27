@@ -26,6 +26,8 @@ interface TrackEventInput {
   sourceUrl?: string;
   userAgent?: string;
   metadata?: Json;
+  /** Running split test this event belongs to (checked by the caller). */
+  splitTestId?: string | null;
 }
 
 export interface AnalyticsDateRange {
@@ -364,7 +366,7 @@ function compareSplitVariants(left: SplitVariantPerformanceRow, right: SplitVari
 
 export async function trackEvent(input: TrackEventInput) {
   const supabase = createServiceClient();
-  const { error } = await supabase.from("analytics_events").insert({
+  const row: Record<string, unknown> = {
     tenant_id: input.tenantId,
     funnel_id: input.funnelId ?? null,
     lead_session_id: input.leadSessionId ?? null,
@@ -374,9 +376,25 @@ export async function trackEvent(input: TrackEventInput) {
     source_url: input.sourceUrl ?? null,
     user_agent: input.userAgent ?? null,
     metadata: input.metadata ?? {}
-  });
+  };
+  // The column is only sent when there is a test, so rows without one keep
+  // working on a database without migration 0025.
+  if (input.splitTestId) row.split_test_id = input.splitTestId;
+
+  const { error } = await supabase.from("analytics_events").insert(row);
+  if (error && input.splitTestId && isMissingColumnError(error)) {
+    const { split_test_id: _dropped, ...withoutTest } = row;
+    void _dropped;
+    const retry = await supabase.from("analytics_events").insert(withoutTest);
+    if (retry.error) throw new Error(retry.error.message);
+    return;
+  }
 
   if (error) throw new Error(error.message);
+}
+
+function isMissingColumnError(error: { code?: string; message?: string }) {
+  return error.code === "42703" || error.code === "PGRST204" || /split_test_id/.test(error.message ?? "");
 }
 
 export async function getFunnelPerformance(tenantId: string, range: AnalyticsDateRange) {

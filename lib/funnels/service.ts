@@ -183,8 +183,19 @@ export async function listFunnels(tenantId?: string) {
 }
 
 export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | null> {
+  return loadBookingFunnel({ slug });
+}
+
+/** Same rules as getFunnelBySlug (active, not taken down, tenant not suspended), by id. */
+export async function getBookingFunnelById(id: string): Promise<BookingFunnel | null> {
+  return loadBookingFunnel({ id });
+}
+
+async function loadBookingFunnel(filter: { slug: string } | { id: string }): Promise<BookingFunnel | null> {
   noStore();
   const supabase = createServiceClient();
+  const filterColumn = "slug" in filter ? "slug" : "id";
+  const filterValue = "slug" in filter ? filter.slug : filter.id;
   const funnelSelect =
     "id,tenant_id,name,slug,description,is_published,logo_url,logo_alignment,show_intro_headline,show_intro_description,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
   const fallbackWithoutLogoAlignmentSelect =
@@ -195,7 +206,7 @@ export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | nul
   const { data: funnel, error: initialFunnelError } = await supabase
     .from("funnels")
     .select(funnelSelect)
-    .eq("slug", slug)
+    .eq(filterColumn, filterValue)
     .eq("is_published", true)
     .is("taken_down_at", null)
     .single();
@@ -206,7 +217,7 @@ export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | nul
     const fallbackWithoutLogoAlignmentResult = await supabase
       .from("funnels")
       .select(fallbackWithoutLogoAlignmentSelect)
-      .eq("slug", slug)
+      .eq(filterColumn, filterValue)
       .eq("is_published", true)
       .single();
 
@@ -219,7 +230,7 @@ export async function getFunnelBySlug(slug: string): Promise<BookingFunnel | nul
       const fallbackResult = await supabase
         .from("funnels")
         .select(fallbackFunnelSelect)
-        .eq("slug", slug)
+        .eq(filterColumn, filterValue)
         .eq("is_published", true)
         .single();
 

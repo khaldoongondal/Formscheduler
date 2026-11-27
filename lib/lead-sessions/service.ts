@@ -1,5 +1,6 @@
 import { PublicError } from "@/lib/api/responses";
 import { assertFunnelServesPublic } from "@/lib/funnels/public-gate";
+import { resolveRecordedSplitTestId } from "@/lib/split-tests/public";
 import { enforceDailyCap } from "@/lib/security/rate-limit";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getRequestGeoMetadata } from "@/lib/analytics/country-filter";
@@ -218,6 +219,7 @@ async function moveDisqualifiedLeadToGhl(
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "booking_error",
       metadata: {
         phase: "disqualified_handoff",
@@ -271,9 +273,12 @@ export async function startLeadSession(input: unknown, request?: Request) {
     ...(trackingMetadata as Record<string, Json | undefined>),
     ...getRequestGeoMetadata(request)
   } as Json;
+  // Decision S9: only a running test this form belongs to is recorded. Never throws.
+  const splitTestId = await resolveRecordedSplitTestId(parsed.test_id, funnel.id, funnel.tenant_id);
   const { data: session, error } = await supabase
     .from("lead_sessions")
     .insert({
+      ...(splitTestId ? { split_test_id: splitTestId } : {}),
       tenant_id: funnel.tenant_id,
       funnel_id: funnel.id,
       status: "started",
@@ -303,6 +308,7 @@ export async function startLeadSession(input: unknown, request?: Request) {
     funnelId: session.funnel_id,
     leadSessionId: session.id,
     visitorId: session.visitor_id ?? undefined,
+    splitTestId: session.split_test_id ?? null,
     eventType: "funnel_start",
     sourceUrl: session.source_url ?? undefined,
     userAgent: session.user_agent ?? undefined,
@@ -329,6 +335,7 @@ export async function startLeadSession(input: unknown, request?: Request) {
       funnelId: updatedSession.funnel_id,
       leadSessionId: updatedSession.id,
       visitorId: updatedSession.visitor_id ?? undefined,
+      splitTestId: updatedSession.split_test_id ?? null,
       eventType: "lead_captured",
       sourceUrl: updatedSession.source_url ?? undefined,
       userAgent: updatedSession.user_agent ?? undefined,
@@ -368,6 +375,7 @@ export async function startLeadSession(input: unknown, request?: Request) {
       funnelId: updatedSession.funnel_id,
       leadSessionId: updatedSession.id,
       visitorId: updatedSession.visitor_id ?? undefined,
+      splitTestId: updatedSession.split_test_id ?? null,
       eventType: "lead_captured",
       sourceUrl: updatedSession.source_url ?? undefined,
       userAgent: updatedSession.user_agent ?? undefined
@@ -384,6 +392,7 @@ export async function startLeadSession(input: unknown, request?: Request) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "booking_error",
       metadata: { phase: "opt_in_handoff", message: error instanceof Error ? error.message : "Unknown GHL handoff error" }
     });
@@ -502,6 +511,7 @@ export async function submitLeadAnswers(input: unknown) {
       funnelId: syncedSession.funnel_id,
       leadSessionId: syncedSession.id,
       visitorId: syncedSession.visitor_id ?? undefined,
+      splitTestId: syncedSession.split_test_id ?? null,
       eventType: "disqualified_lead",
       metadata: {
         disqualifying_options: disqualifyingOptions.map((option) => ({
@@ -539,6 +549,7 @@ export async function submitLeadAnswers(input: unknown) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "qualified_lead"
     });
   }
@@ -567,6 +578,7 @@ export async function syncLeadAnswersToGhl(leadSessionId: string) {
         funnelId: session.funnel_id,
         leadSessionId: session.id,
         visitorId: session.visitor_id ?? undefined,
+        splitTestId: session.split_test_id ?? null,
         eventType: "booking_error",
         metadata: {
           phase: "ghl_answer_custom_fields",
@@ -581,6 +593,7 @@ export async function syncLeadAnswersToGhl(leadSessionId: string) {
         funnelId: session.funnel_id,
         leadSessionId: session.id,
         visitorId: session.visitor_id ?? undefined,
+        splitTestId: session.split_test_id ?? null,
         eventType: "booking_error",
         metadata: {
           phase: "ghl_answer_note",
@@ -594,6 +607,7 @@ export async function syncLeadAnswersToGhl(leadSessionId: string) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "booking_error",
       metadata: {
         phase: "ghl_answer_sync",
@@ -642,6 +656,7 @@ export async function abandonLeadSession(id: string) {
     funnelId: session.funnel_id,
     leadSessionId: session.id,
     visitorId: session.visitor_id ?? undefined,
+    splitTestId: session.split_test_id ?? null,
     eventType: "abandoned"
   });
   return updated;

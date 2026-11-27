@@ -48,6 +48,7 @@ export async function getAvailableSlots(input: unknown) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "slots_shown",
       metadata: { mode: "demo_slot_preview", slot_count: slots.length }
     });
@@ -97,6 +98,7 @@ export async function getAvailableSlots(input: unknown) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "slots_shown",
       metadata: { slot_count: slots.length }
     });
@@ -115,6 +117,7 @@ export async function getAvailableSlots(input: unknown) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "booking_error",
       metadata: { phase: "slot_lookup", message: error instanceof Error ? error.message : "Unknown booking error" }
     });
@@ -200,6 +203,7 @@ export async function bookAppointment(input: unknown) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "appointment_booked",
       metadata: { mode: "demo_slot_preview", appointment_id: appointmentId, opportunity_id: ghlOpportunityId }
     });
@@ -286,6 +290,7 @@ export async function bookAppointment(input: unknown) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "appointment_booked",
       metadata: { appointment_id: appointmentId, opportunity_id: opportunityId }
     });
@@ -305,6 +310,7 @@ export async function bookAppointment(input: unknown) {
       funnelId: session.funnel_id,
       leadSessionId: session.id,
       visitorId: session.visitor_id ?? undefined,
+      splitTestId: session.split_test_id ?? null,
       eventType: "booking_error",
       metadata: { phase: "appointment_create", message: error instanceof Error ? error.message : "Unknown booking error" }
     });

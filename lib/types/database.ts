@@ -22,6 +22,7 @@ export type QuestionType =
 export type AnalyticsEventType =
   | "page_view"
   | "step_view"
+  | "form_start"
   | "funnel_start"
   | "lead_captured"
   | "qualified_lead"
@@ -181,6 +182,8 @@ export interface LeadSession {
   user_agent: string | null;
   ip_address: string | null;
   metadata: Json;
+  /** Running split test this lead came through (migration 0025). */
+  split_test_id?: string | null;
   started_at: string;
   qualified_at: string | null;
   slots_shown_at: string | null;
@@ -249,7 +252,32 @@ export interface AnalyticsEvent {
   source_url: string | null;
   user_agent: string | null;
   metadata: Json;
+  /** Running split test this event belongs to (migration 0025). */
+  split_test_id?: string | null;
   occurred_at: string;
+  created_at: string;
+}
+
+export type SplitTestStatus = "draft" | "running" | "ended";
+
+export interface SplitTest {
+  id: string;
+  tenant_id: string;
+  name: string;
+  slug: string;
+  status: SplitTestStatus;
+  winner_funnel_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SplitTestMember {
+  test_id: string;
+  funnel_id: string;
+  tenant_id: string;
+  position: number;
   created_at: string;
 }
 
@@ -356,6 +384,8 @@ export interface Database {
       form_reports: Table<FormReport>;
       signup_requests: Table<SignupRequest>;
       owner_audit_log: Table<OwnerAuditLog>;
+      split_tests: Table<SplitTest>;
+      split_test_members: Table<SplitTestMember>;
     };
     Views: Record<string, never>;
     Functions: {

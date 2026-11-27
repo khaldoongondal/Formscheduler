@@ -56,7 +56,9 @@ export const analyticsEventSchema = z.object({
   funnel_id: z.string().uuid(),
   lead_session_id: z.string().uuid().optional(),
   visitor_id: z.string().min(8).max(128).optional(),
-  event_type: z.enum(["page_view", "step_view"]),
+  event_type: z.enum(["page_view", "step_view", "form_start"]),
+  /** Split test the page was served for; the server re-checks it (decision S9). */
+  test_id: z.string().uuid().optional(),
   source: z.string().max(40).optional(),
   source_url: z.string().url().max(2048).optional(),
   user_agent: z.string().max(512).optional(),

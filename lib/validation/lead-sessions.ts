@@ -29,7 +29,9 @@ export const startLeadSessionSchema = z
     fingerprint: z.string().max(160).optional(),
     split_test_id: z.string().max(160).optional(),
     split_variant: z.string().max(80).optional(),
-    landing_page_url: z.string().url().optional()
+    landing_page_url: z.string().url().optional(),
+    /** Split test the page was served for; the server re-checks it (decision S9). */
+    test_id: z.string().uuid().optional()
   })
   .refine((value) => Boolean(value.email || value.phone), {
     message: "Email or phone is required.",

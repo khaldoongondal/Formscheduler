@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { CalendarDays, LogOut, PlugZap, Rows3, Users } from "lucide-react";
+import { CalendarDays, LogOut, PlugZap, Rows3, Split, Users } from "lucide-react";
 import { signOut } from "@/app/login/actions";
 import { getPlatformOwner } from "@/lib/auth/owner-server";
 import { ScrollPositionRestorer } from "@/components/admin/scroll-position-restorer";
@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 
 const navItems = [
   { href: "/admin/funnels", label: "Funnels", Icon: Rows3 },
+  { href: "/admin/split-tests", label: "Split Tests", Icon: Split },
   { href: "/admin/ghl-connections", label: "GHL Connections", Icon: PlugZap }
 ];
 

@@ -3,6 +3,7 @@ import { failPublic, ok } from "@/lib/api/responses";
 import { getRequestGeoMetadata } from "@/lib/analytics/country-filter";
 import { trackEvent } from "@/lib/analytics/service";
 import { assertFunnelServesPublic } from "@/lib/funnels/public-gate";
+import { resolveRecordedSplitTestId } from "@/lib/split-tests/public";
 import { ANALYTICS_MAX_BODY_BYTES } from "@/lib/security/limits";
 import { enforceDailyCap, enforceRateLimit } from "@/lib/security/rate-limit";
 import type { Json } from "@/lib/types/database";
@@ -43,6 +44,9 @@ export async function POST(request: NextRequest) {
       return ok({ tracked: false }, 202);
     }
 
+    // Never throws: a bad or forged test id is stored as null.
+    const splitTestId = await resolveRecordedSplitTestId(parsed.test_id, funnel.id, funnel.tenant_id);
+
     await trackEvent({
       tenantId: funnel.tenant_id,
       funnelId: funnel.id,
@@ -55,7 +59,8 @@ export async function POST(request: NextRequest) {
       metadata: {
         ...(parsed.metadata ?? {}),
         ...getRequestGeoMetadata(request)
-      } as Json
+      } as Json,
+      splitTestId
     });
     return ok({ tracked: true }, 201);
   } catch (error) {

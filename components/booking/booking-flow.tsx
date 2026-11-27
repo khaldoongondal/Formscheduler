@@ -10,6 +10,12 @@ import {
 } from "@/lib/funnels/contact-fields";
 import { answerMatchesQuestionDisqualificationRule } from "@/lib/funnels/disqualification";
 import { isValidWebsiteValue, websiteValidationMessage } from "@/lib/validation/website";
+import {
+  adoptVisitorId,
+  createPageLoadId,
+  getVisitorId,
+  writeVisitorCookie
+} from "@/lib/booking/visitor-id";
 import { FormFooter } from "@/components/booking/form-footer";
 import { PhoneInput } from "@/components/booking/phone-input";
 
@@ -45,6 +51,24 @@ interface SubmitAnswersResponse {
 interface BookingFlowProps {
   funnel: BookingFunnel;
   mode: "full" | "embed";
+  /** Set when the page was served by a running split test link (/t or /embed/t). */
+  splitTest?: { id: string } | null;
+  /** Visitor id chosen by the split test link; wins over the stored one. */
+  initialVisitorId?: string | null;
+}
+
+/** Query parameter the split test resolver adds; removed from the address bar after load. */
+const SPLIT_VISITOR_QUERY_KEY = "fb_vid";
+
+function removeSplitVisitorQuery() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has(SPLIT_VISITOR_QUERY_KEY)) return;
+    url.searchParams.delete(SPLIT_VISITOR_QUERY_KEY);
+    window.history.replaceState(window.history.state, "", url.toString());
+  } catch {
+    // Leaving the parameter in place is harmless.
+  }
 }
 
 const baseButtonClass =
@@ -220,20 +244,6 @@ function getCalendarPreviewDays(date = new Date()) {
   ];
 }
 
-function getVisitorId() {
-  const key = "leadder_visitor_id";
-  const generated =
-    window.crypto?.randomUUID?.() ?? `visitor_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
-  try {
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
-    window.localStorage.setItem(key, generated);
-  } catch {
-    return generated;
-  }
-  return generated;
-}
-
 function getTrackingParams() {
   const params = new URLSearchParams(window.location.search);
   return {
@@ -362,7 +372,7 @@ function getIntakePageTrackingMetadata(page: IntakePage, pageIndex: number) {
   };
 }
 
-export function BookingFlow({ funnel, mode }: BookingFlowProps) {
+export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId = null }: BookingFlowProps) {
   const [step, setStep] = useState<FlowStep>("intake");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [intakePageIndex, setIntakePageIndex] = useState(0);
@@ -375,6 +385,20 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
   const [visitorId, setVisitorId] = useState<string | null>(null);
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const trackedStepViewsRef = useRef<Set<string>>(new Set());
+  const pageLoadIdRef = useRef<string | null>(null);
+  const formStartedRef = useRef(false);
+  const splitTestId = splitTest?.id ?? null;
+
+  /** One id per page load, sent with every analytics call. */
+  function getPageLoadId() {
+    pageLoadIdRef.current ??= createPageLoadId();
+    return pageLoadIdRef.current;
+  }
+
+  /** Split test fields for analytics and lead session payloads (omitted when there is no test). */
+  function splitTestPayload() {
+    return splitTestId ? { test_id: splitTestId } : {};
+  }
 
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const intakePages = useMemo(() => buildIntakePages(funnel), [funnel]);
@@ -432,7 +456,10 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
       : "flex w-full flex-col border-b border-slate-200 bg-white lg:min-h-[590px] lg:border-b-0 lg:border-r lg:border-slate-200";
 
   useEffect(() => {
-    const id = getVisitorId();
+    const id = initialVisitorId ?? getVisitorId();
+    if (initialVisitorId) adoptVisitorId(id);
+    if (splitTestId || initialVisitorId) writeVisitorCookie(id);
+    removeSplitVisitorQuery();
     const trackingParams = getTrackingParams();
     setVisitorId(id);
     void postJson("/api/analytics", {
@@ -442,8 +469,10 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
       source: mode,
       source_url: window.location.href,
       user_agent: window.navigator.userAgent,
-      metadata: trackingParams
+      ...(splitTestId ? { test_id: splitTestId } : {}),
+      metadata: { ...trackingParams, page_load_id: getPageLoadId() }
     }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per form and mode, like before
   }, [funnel.id, mode]);
 
   useEffect(() => {
@@ -476,12 +505,32 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
       source: mode,
       source_url: window.location.href,
       user_agent: window.navigator.userAgent,
+      ...splitTestPayload(),
       metadata: {
         ...trackingParams,
-        ...stepMetadata
+        ...stepMetadata,
+        page_load_id: getPageLoadId()
       }
     }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the helpers read refs and a stable prop
   }, [currentIntakePage, funnel.id, intakePageIndex, intakePages.length, mode, sessionId, step, visitorId]);
+
+  /** form_start: sent once per page load, the first time the visitor fills anything in. */
+  function markFormStarted() {
+    if (formStartedRef.current) return;
+    formStartedRef.current = true;
+    void postJson("/api/analytics", {
+      funnel_id: funnel.id,
+      lead_session_id: sessionId ?? undefined,
+      visitor_id: visitorId ?? getVisitorId(),
+      event_type: "form_start",
+      source: mode,
+      source_url: window.location.href,
+      user_agent: window.navigator.userAgent,
+      ...splitTestPayload(),
+      metadata: { ...getTrackingParams(), page_load_id: getPageLoadId() }
+    }).catch(() => undefined);
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -556,7 +605,8 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
       source_url: window.location.href,
       referrer: document.referrer || undefined,
       fingerprint: resolvedFingerprint,
-      ...getTrackingParams()
+      ...getTrackingParams(),
+      ...splitTestPayload()
     });
     const leadSessionId = response.session.id;
     setSessionId(leadSessionId);
@@ -565,6 +615,7 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
 
   async function handleContactPageSubmit(event: FormEvent<HTMLFormElement>, fields: ContactFieldKey[]) {
     event.preventDefault();
+    markFormStarted();
     setError(null);
 
     const formData = new FormData(event.currentTarget);
@@ -722,6 +773,7 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
   }
 
   function handleQuestionAnswer(question: BookingQuestion, value: AnswerValue) {
+    markFormStarted();
     const nextAnswers = { ...answers, [question.id]: value };
     setAnswers(nextAnswers);
 
@@ -838,6 +890,7 @@ export function BookingFlow({ funnel, mode }: BookingFlowProps) {
                   {step === "intake" && currentIntakePage?.type === "contact" ? (
                     <form
                       onSubmit={(event) => void handleContactPageSubmit(event, currentIntakePage.fields)}
+                      onInput={markFormStarted}
                       className="space-y-4 sm:space-y-5"
                     >
                       {currentIntakePage.fields.map((fieldKey) => renderContactField(fieldKey))}
