@@ -43,5 +43,27 @@ export const CONNECTIONS_COPY = {
   inactiveSuffix: " (inactive)",
   ghlMappingOnly: "GoHighLevel field mapping is used only when this form sends leads to GoHighLevel.",
   ghlPipelinesOnly: "Pipelines and the opportunity name are used only when this form sends leads to GoHighLevel.",
-  notSet: "Not set"
+  notSet: "Not set",
+  // Connection detail page (P2.8).
+  backToConnections: "Back to Connections",
+  renameLabel: "Name",
+  renameButton: "Rename",
+  switchOff: "Switch off",
+  switchOn: "Switch on",
+  checkConnection: "Check connection",
+  lastChecked: (when: string, summary: string) => `Last checked ${when}: ${summary}`,
+  neverChecked: "Not checked yet.",
+  formsUsingHeading: "Forms using this connection",
+  noFormsUsing: "No forms use this connection yet.",
+  activeBadge: "Active",
+  deleteButton: "Delete connection",
+  deleteTitle: "Delete this connection?",
+  deleteDescription: (name: string) =>
+    `This removes ${name} from FormBook. Forms using it cannot take bookings until you choose another connection.`,
+  connectionDeleted: "Connection deleted.",
+  savedRenamed: "Name saved.",
+  savedDisabled: "Connection switched off.",
+  savedEnabled: "Connection switched on.",
+  savedChecked: "Check finished.",
+  savedCreated: "Connection added."
 } as const;

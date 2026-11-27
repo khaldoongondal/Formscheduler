@@ -1,0 +1,41 @@
+/**
+ * Copy for Google Calendar connections. Pure: no imports.
+ */
+export const GOOGLE_COPY = {
+  notConfigured: "Google Calendar sign-in is not set up on this server yet.",
+  notConfiguredButton: "Google Calendar is not set up on this server yet.",
+  connectButton: "Connect Google Calendar",
+  cancelled: "Google sign-in was cancelled.",
+  expired: "Google sign-in expired. Please try again.",
+  sessionMismatch: "Google sign-in could not be matched to your session. Start again from Connections.",
+  scopesMissing: "Please allow FormBook to see when you are free and to add events, then try again.",
+  failed: "Google sign-in failed. Please try again.",
+  connected: "Google Calendar connected. Set your working hours below so forms can offer times.",
+  accessRemoved: "Google access was removed or has expired. Reconnect this calendar.",
+  connectedAs: (email: string) => `Connected as ${email}`,
+  reconnect: "Reconnect",
+  availabilityHeading: "Working hours",
+  availabilityIntro:
+    "FormBook offers times inside your working hours that are free in your Google Calendar, and adds each booking to it.",
+  availabilityUnconfirmed: "Save your working hours once before any form can use this calendar.",
+  availabilitySaved: "Working hours saved.",
+  saveAvailability: "Save working hours",
+  timezoneLabel: "Time zone",
+  availableLabel: "Available",
+  addHours: "Add hours",
+  removeHours: "Remove",
+  meetingLength: "Meeting length",
+  startEvery: "Start times every",
+  sameAsLength: "Same as meeting length",
+  bufferBefore: "Buffer before",
+  bufferAfter: "Buffer after",
+  minNotice: "Minimum notice",
+  noNotice: "None",
+  daysAhead: "Days ahead",
+  meetLabel: "Add a Google Meet link",
+  editorHoursNote: "Working hours, meeting length and buffers are set on the connection.",
+  editorHoursLink: "Open the connection",
+  editorTitleNote: "The appointment title above is used as the event title. When it is empty the title is Call with the lead's name.",
+  checkOk: "Google Calendar answered and free and busy times were read.",
+  checkFailed: "Google Calendar did not answer. Reconnect this calendar if this keeps happening."
+} as const;

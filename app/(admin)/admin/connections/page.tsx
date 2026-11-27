@@ -18,6 +18,9 @@ import { listConnections, type ConnectionSummary } from "@/lib/connections/servi
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { listGhlConnections } from "@/lib/ghl/connections";
 import { isGhlOauthConfigured } from "@/lib/ghl/oauth";
+import { CALCOM_COPY } from "@/lib/calcom/constants";
+import { GOOGLE_COPY } from "@/lib/google/copy";
+import { isGoogleOauthConfigured } from "@/lib/google/oauth";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { SaveSubmitButton } from "@/components/admin/save-submit-button";
 import { SetupRequired } from "@/components/setup/setup-required";
@@ -27,6 +30,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export const dynamic = "force-dynamic";
+
+const ADD_LABELS: Partial<Record<ProviderKind, string>> = {
+  google_calendar: GOOGLE_COPY.connectButton,
+  calcom: CALCOM_COPY.createButton
+};
 
 export default async function ConnectionsPage({
   searchParams
@@ -54,6 +62,7 @@ export default async function ConnectionsPage({
     })
   ]);
   const oauthAvailable = isGhlOauthConfigured();
+  const googleAvailable = isGoogleOauthConfigured();
   const query = searchParams ? await searchParams : {};
   const savedConnectionId =
     query.saved === "connection" || query.saved === "created" || query.saved === "oauth"
@@ -62,6 +71,8 @@ export default async function ConnectionsPage({
   const actionSuccess =
     query.saved === "deleted"
       ? CONNECTIONS_COPY.ghlDeleted
+      : query.saved === "connection-deleted"
+        ? CONNECTIONS_COPY.connectionDeleted
       : query.saved === "oauth"
         ? CONNECTIONS_COPY.ghlOauthConnected
         : null;
@@ -211,11 +222,17 @@ export default async function ConnectionsPage({
 
           {addableProviders.length ? (
             <div className="mt-6 space-y-2 border-t border-slate-100 pt-6">
-              {addableProviders.map((kind) => (
-                <Button key={kind} asChild variant="outline" className="w-full">
-                  <a href={PROVIDERS[kind].addHref ?? "/admin/connections"}>{PROVIDERS[kind].label}</a>
-                </Button>
-              ))}
+              {addableProviders.map((kind) =>
+                kind === "google_calendar" && !googleAvailable ? (
+                  <p key={kind} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                    {GOOGLE_COPY.notConfiguredButton}
+                  </p>
+                ) : (
+                  <Button key={kind} asChild variant="outline" className="w-full">
+                    <a href={PROVIDERS[kind].addHref ?? "/admin/connections"}>{ADD_LABELS[kind] ?? PROVIDERS[kind].label}</a>
+                  </Button>
+                )
+              )}
             </div>
           ) : null}
         </CardContent>

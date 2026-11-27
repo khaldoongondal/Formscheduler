@@ -22,11 +22,11 @@ export const PROVIDERS: Record<ProviderKind, ProviderMeta> = {
   google_calendar: {
     label: "Google Calendar",
     roles: ["calendar"],
-    available: false,
+    available: true,
     helpAnchor: "google-calendar",
     addHref: "/api/connect/google/start"
   },
-  calcom: { label: "Cal.com", roles: ["calendar"], available: false, helpAnchor: "cal-com", addHref: "/admin/connections/new/calcom" },
+  calcom: { label: "Cal.com", roles: ["calendar"], available: true, helpAnchor: "cal-com", addHref: "/admin/connections/new/calcom" },
   calendly: {
     label: "Calendly",
     roles: ["calendar"],

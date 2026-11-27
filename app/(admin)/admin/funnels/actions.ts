@@ -23,6 +23,8 @@ import {
 } from "@/lib/funnels/disqualification";
 import { assertOptionInFunnel, assertQuestionInFunnel } from "@/lib/funnels/question-scope";
 import { PICKER_INVALID_MESSAGE, resolvePickerChoices } from "@/lib/connections/registry";
+import { calendarSettingsFromForm } from "@/lib/connections/calendar-settings";
+import type { CalendarKind } from "@/lib/connections/types";
 import { addFormSpend, deleteFormSpend } from "@/lib/spend/service";
 import { funnelDeleteBlocker } from "@/lib/split-tests/rules";
 import { listSplitTestsUsingFunnel } from "@/lib/split-tests/service";
@@ -284,11 +286,27 @@ function connectionChoiceFromForm(
 
 export async function updateFunnelAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  const { funnel } = await assertAdminFunnel(id);
+  const { funnel, tenantId } = await assertAdminFunnel(id);
 
   try {
-    const connectionChoice = connectionChoiceFromForm(formData, funnel.calendar_provider !== undefined);
+    const hasConnectionColumns = funnel.calendar_provider !== undefined;
+    const connectionChoice = connectionChoiceFromForm(formData, hasConnectionColumns);
+    const calendarSettings =
+      hasConnectionColumns && connectionChoice
+        ? await calendarSettingsFromForm({
+            formData,
+            tenantId,
+            calendarProvider: (connectionChoice.calendar_provider ?? "ghl") as CalendarKind,
+            calendarConnectionId: connectionChoice.calendar_connection_id || null,
+            saved: {
+              calendarProvider: (funnel.calendar_provider ?? "ghl") as CalendarKind,
+              calendarConnectionId: funnel.calendar_connection_id ?? null,
+              calendarSettings: funnel.calendar_settings
+            }
+          })
+        : undefined;
     await updateFunnel({
+      ...(calendarSettings !== undefined ? { calendar_settings: calendarSettings } : {}),
       id,
       name: String(formData.get("name") ?? ""),
       slug: String(formData.get("slug") ?? ""),

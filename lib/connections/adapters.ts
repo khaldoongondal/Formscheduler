@@ -1,10 +1,12 @@
 /**
  * Provider kind to adapter and context factory (P1.8). P1 registers
- * GoHighLevel; P2 and P3 add Google Calendar, Cal.com, Calendly, HubSpot
- * and Webhook.
+ * GoHighLevel; P2 adds Google Calendar and Cal.com; P3 adds Calendly,
+ * HubSpot and Webhook.
  */
 import type { ConnectionRow } from "@/lib/connections/service";
+import { calcomContext, calcomProvider } from "@/lib/connections/calcom";
 import { ghlCalendarProvider, type GhlCalendarCtx } from "@/lib/connections/ghl-calendar";
+import { googleCalendarContext, googleCalendarProvider } from "@/lib/connections/google-calendar";
 import { ghlCrmProvider, type GhlCrmCtx } from "@/lib/connections/ghl-crm";
 import type { CalendarKind, CalendarProvider, CrmKind, CrmProvider } from "@/lib/connections/types";
 import { resolveGhlRuntimeConfig } from "@/lib/ghl/connections";
@@ -58,6 +60,20 @@ export const ADAPTERS: Partial<Record<CalendarKind | CrmKind, AdapterEntry>> = {
         connectionId: row.id,
         questions: await loadFormQuestions(funnel)
       };
+    }
+  },
+  google_calendar: {
+    calendar: googleCalendarProvider,
+    async calendarContext(row, funnel) {
+      if (!row || isGhlConnection(row)) return null;
+      return googleCalendarContext(row, funnel);
+    }
+  },
+  calcom: {
+    calendar: calcomProvider,
+    async calendarContext(row, funnel) {
+      if (!row || isGhlConnection(row)) return null;
+      return calcomContext(row, funnel);
     }
   }
 };

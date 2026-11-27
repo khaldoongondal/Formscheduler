@@ -25,6 +25,7 @@ export const BOOKING_UNAVAILABLE_MESSAGE = "Booking is not available for this fo
 export const EMBED_BOOKING_MESSAGE = "Please choose a time in the calendar above.";
 export const INVALID_SLOT_MESSAGE = "Please choose a time from the list.";
 const MAX_BOOKING_MINUTES = 240;
+const STALE_PENDING_MS = 300_000;
 
 function errorText(error: unknown) {
   return (error instanceof Error ? error.message : "Unknown booking error").slice(0, 300);
@@ -132,6 +133,18 @@ export async function genericBookAppointment(
   }
 
   const supabase = createServiceClient();
+  if (resolved.connectionId) {
+    // Decision C13: a pending hold older than 5 minutes for this start no longer blocks it.
+    const { error: staleError } = await supabase
+      .from("booking_attempts")
+      .update({ status: "error", error_code: "stale", error_message: "Abandoned pending booking." })
+      .eq("tenant_id", session.tenant_id)
+      .eq("calendar_connection_id", resolved.connectionId)
+      .eq("slot_start", parsed.slot_start)
+      .eq("status", "pending")
+      .lt("created_at", new Date(Date.now() - STALE_PENDING_MS).toISOString());
+    if (staleError) console.error("[bookings] stale hold cleanup failed", staleError.code ?? "unknown");
+  }
   const { data: attempt, error: attemptError } = await supabase
     .from("booking_attempts")
     .insert({

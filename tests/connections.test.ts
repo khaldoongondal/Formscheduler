@@ -684,7 +684,9 @@ describe("copy", () => {
   it("has no em dash", () => {
     const texts = [
       ...Object.values(READINESS_COPY),
-      ...Object.values(CONNECTIONS_COPY).map((value) => (typeof value === "function" ? value(["A", "B"]) : value)),
+      ...Object.values(CONNECTIONS_COPY).map((value) =>
+        typeof value === "function" ? (value as (...args: unknown[]) => string)(["A", "B"], "B") : value
+      ),
       SLOT_TAKEN_MESSAGE,
       PICKER_INVALID_MESSAGE
     ];

@@ -202,6 +202,26 @@ export async function listActiveFormsUsingConnection(
   return (data ?? []).map((row) => ({ id: row.id as string, name: row.name as string }));
 }
 
+/** Every form of this tenant (active or not) that uses a generic connection. */
+export async function listFormsUsingConnection(
+  tenantId: string,
+  id: string
+): Promise<Array<{ id: string; name: string; isPublished: boolean }>> {
+  if (!isUuid(id)) return [];
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("funnels")
+    .select("id,name,is_published")
+    .eq("tenant_id", tenantId)
+    .or(`calendar_connection_id.eq.${id},crm_connection_id.eq.${id}`)
+    .order("name", { ascending: true });
+  if (error) {
+    if (error.code === "42703") return [];
+    throw new Error(error.message);
+  }
+  return (data ?? []).map((row) => ({ id: row.id as string, name: row.name as string, isPublished: Boolean(row.is_published) }));
+}
+
 /**
  * Refused while an Active form uses it (decision C9). `beforeDelete` (token
  * revocation, webhook cleanup) is best effort and never blocks the delete.

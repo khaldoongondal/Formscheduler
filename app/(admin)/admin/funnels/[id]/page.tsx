@@ -5,6 +5,8 @@ import { PROVIDERS, pickerValue, providerLabel } from "@/lib/connections/registr
 import { listConnections, type ConnectionSummary } from "@/lib/connections/service";
 import type { CalendarKind, CrmKind } from "@/lib/connections/types";
 import { ConnectionPickers } from "@/components/admin/connection-pickers";
+import { CalcomPanel, GoogleCalendarPanel } from "@/components/admin/calendar-panels";
+import { loadCalcomEventTypes } from "@/lib/connections/calcom";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -216,6 +218,16 @@ export default async function FunnelDetailPage({
   const crmConnection =
     crmKind !== "ghl" ? genericConnections.find((connection) => connection.id === funnel.crm_connection_id) ?? null : null;
   const sendsToGhl = crmKind === "ghl";
+  const savedCalendarSettings =
+    funnel.calendar_settings && typeof funnel.calendar_settings === "object" && !Array.isArray(funnel.calendar_settings)
+      ? (funnel.calendar_settings as Record<string, unknown>)
+      : {};
+  // Decision C23: option lists load for the connection saved on the form.
+  const calcomEventTypes =
+    calendarKind === "calcom" && funnel.calendar_connection_id
+      ? await loadCalcomEventTypes(funnel.tenant_id, funnel.calendar_connection_id)
+      : null;
+  const savedCalcomEventTypeId = Number(savedCalendarSettings.event_type_id);
   // Active forms that cannot take bookings (for example activated before this check existed).
   const bookingSetupWarning = funnel.is_published
     ? formReadinessError(
@@ -638,8 +650,22 @@ export default async function FunnelDetailPage({
                             Smaller availability windows load faster and create more urgency. This does not change the GoHighLevel calendar itself.
                           </p>
                         </>
+                      ),
+                      google_calendar: (
+                        <GoogleCalendarPanel
+                          connectionId={calendarKind === "google_calendar" ? funnel.calendar_connection_id ?? null : null}
+                          meet={calendarKind === "google_calendar" && savedCalendarSettings.google_meet === true}
+                        />
+                      ),
+                      calcom: (
+                        <CalcomPanel
+                          eventTypes={calcomEventTypes ? (calcomEventTypes.ok ? calcomEventTypes.eventTypes : null) : []}
+                          selectedId={Number.isInteger(savedCalcomEventTypeId) && savedCalcomEventTypeId > 0 ? savedCalcomEventTypeId : null}
+                          windowDays={funnel.availability_window_days ?? 14}
+                        />
                       )
                     }}
+                    panelsNeedingSave={["calcom"]}
                   />
                 </SettingsGroup>
 
