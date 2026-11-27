@@ -362,9 +362,10 @@ describe("Meta booked call for Calendly when both confirmations arrive", () => {
     assert.deepEqual(webhook.metaEvents, []);
   });
 
-  it("recordCalendlyBooking stops on a duplicate invitee and re-reads the lead when no row guards it", () => {
+  it("recordCalendlyBooking re-reads the lead on any duplicate and lets the recorder finish an unfinished run", () => {
     const body = functionBody(source("lib/connections/calendly.ts"), "recordCalendlyBooking");
-    assert.match(body, /if \(existing\) return \{ attempt: null, metaEvents: \[\] \};/);
+    // A duplicate invitee no longer returns early: a first run that stopped after the insert is finished by the retry.
+    assert.doesNotMatch(body, /if \(existing\) return/);
     assert.match(body, /from\("lead_sessions"\)\s*\.select\("\*"\)\s*\.eq\("id", session\.id\)\s*\.eq\("tenant_id", session\.tenant_id\)/);
     assert.match(body, /recorder\.record\("booked", session, funnel/);
   });

@@ -1,3 +1,4 @@
+import { LeadStatusKeptError, type StatusUpdateOptions } from "@/lib/lead-sessions/status-guard";
 import { PublicError } from "@/lib/api/responses";
 import { assertFunnelServesPublic } from "@/lib/funnels/public-gate";
 import { resolveRecordedSplitTestId } from "@/lib/split-tests/public";
@@ -736,7 +737,15 @@ export async function syncLeadAnswersToGhl(leadSessionId: string) {
   }
 }
 
-export async function updateLeadSessionStatus(id: string, status: LeadSession["status"]) {
+/**
+ * With options.unlessStatusIn the change is one conditional update, and
+ * LeadStatusKeptError is thrown when the row kept its status.
+ */
+export async function updateLeadSessionStatus(
+  id: string,
+  status: LeadSession["status"],
+  options?: StatusUpdateOptions
+): Promise<LeadSession> {
   const supabase = createServiceClient();
   const timestampField = {
     started: null,
@@ -749,16 +758,24 @@ export async function updateLeadSessionStatus(id: string, status: LeadSession["s
     error: "errored_at"
   }[status];
 
-  const { data, error } = await supabase
+  const update = supabase
     .from("lead_sessions")
     .update({
       status,
       ...(timestampField ? { [timestampField]: new Date().toISOString() } : {})
     })
-    .eq("id", id)
-    .select("*")
-    .single();
+    .eq("id", id);
 
+  if (options) {
+    const skip = options.unlessStatusIn.filter((value) => /^[a-z_]+$/.test(value));
+    const guarded = skip.length ? update.not("status", "in", `(${skip.join(",")})`) : update;
+    const { data, error } = await guarded.select("*").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new LeadStatusKeptError();
+    return data;
+  }
+
+  const { data, error } = await update.select("*").single();
   if (error) throw new Error(error.message);
   return data;
 }

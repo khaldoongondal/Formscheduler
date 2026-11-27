@@ -18,6 +18,29 @@ import {
   updateDealStage,
   upsertContactByEmail
 } from "@/lib/hubspot/client";
+
+/** The HubSpot calls a delivery makes; injectable for tests. */
+export type HubspotApi = {
+  associateDefault: typeof associateDefault;
+  createContact: typeof createContact;
+  createDeal: typeof createDeal;
+  createNote: typeof createNote;
+  searchContactByPhone: typeof searchContactByPhone;
+  updateContact: typeof updateContact;
+  updateDealStage: typeof updateDealStage;
+  upsertContactByEmail: typeof upsertContactByEmail;
+};
+
+const DEFAULT_API: HubspotApi = {
+  associateDefault,
+  createContact,
+  createDeal,
+  createNote,
+  searchContactByPhone,
+  updateContact,
+  updateDealStage,
+  upsertContactByEmail
+};
 import { HUBSPOT_COPY } from "@/lib/hubspot/constants";
 import {
   contactProperties,
@@ -49,11 +72,11 @@ function statusOf(error: unknown): number | null {
   return error instanceof ProviderHttpError ? error.status : null;
 }
 
-async function resolveContact(ctx: HubspotCtx, event: FormBookEvent, lead: CrmLeadState): Promise<string> {
+async function resolveContact(api: HubspotApi, ctx: HubspotCtx, event: FormBookEvent, lead: CrmLeadState): Promise<string> {
   const properties = contactProperties(event.lead);
   if (lead.crmContactId) {
     try {
-      await updateContact(ctx.token, lead.crmContactId, properties);
+      await api.updateContact(ctx.token, lead.crmContactId, properties);
       return lead.crmContactId;
     } catch (error) {
       // A contact deleted in HubSpot is found or created again below.
@@ -61,17 +84,17 @@ async function resolveContact(ctx: HubspotCtx, event: FormBookEvent, lead: CrmLe
     }
   }
   if (properties.email) {
-    const id = await upsertContactByEmail(ctx.token, properties.email, properties);
+    const id = await api.upsertContactByEmail(ctx.token, properties.email, properties);
     if (id) return id;
   }
   if (properties.phone) {
-    const found = await searchContactByPhone(ctx.token, properties.phone);
+    const found = await api.searchContactByPhone(ctx.token, properties.phone);
     if (found) {
-      await updateContact(ctx.token, found, properties);
+      await api.updateContact(ctx.token, found, properties);
       return found;
     }
   }
-  return createContact(ctx.token, properties);
+  return api.createContact(ctx.token, properties);
 }
 
 async function onAuthFailure(ctx: HubspotCtx, status: number | null) {
@@ -82,12 +105,25 @@ async function onAuthFailure(ctx: HubspotCtx, status: number | null) {
   });
 }
 
-export async function deliverToHubspot(ctx: HubspotCtx, event: FormBookEvent, lead: CrmLeadState): Promise<CrmDeliveryOutcome> {
+/**
+ * Every step is safe to repeat on a retry: the contact is found again, the
+ * deal id comes back in `updates`, and the default deal to contact
+ * association (a PUT) is made on every delivery that has a deal, so a deal
+ * whose association failed last time is linked now. The note is created and
+ * linked to the contact before anything else can fail; linking it to the
+ * deal is best effort, so a retry never adds a second visible note.
+ */
+export async function deliverToHubspot(
+  ctx: HubspotCtx,
+  event: FormBookEvent,
+  lead: CrmLeadState,
+  api: HubspotApi = DEFAULT_API
+): Promise<CrmDeliveryOutcome> {
   if (event.type === "test.ping") return { outcome: "sent", httpStatus: null, summary: HUBSPOT_COPY.checkOk };
   const updates: NonNullable<CrmDeliveryOutcome["updates"]> = {};
   let step = "contact";
   try {
-    const contactId = await resolveContact(ctx, event, lead);
+    const contactId = await resolveContact(api, ctx, event, lead);
     if (contactId !== lead.crmContactId) updates.crmContactId = contactId;
 
     step = "deal";
@@ -96,7 +132,7 @@ export async function deliverToHubspot(ctx: HubspotCtx, event: FormBookEvent, le
     let plan = dealPlan(event, ctx.settings, Boolean(dealId));
     if (plan.action === "move" && dealId) {
       try {
-        await updateDealStage(ctx.token, dealId, plan.stageId);
+        await api.updateDealStage(ctx.token, dealId, plan.stageId);
         dealSummary = "Deal moved.";
       } catch (error) {
         if (statusOf(error) !== 404) throw error;
@@ -106,22 +142,33 @@ export async function deliverToHubspot(ctx: HubspotCtx, event: FormBookEvent, le
       }
     }
     if (plan.action === "create" && ctx.settings.pipeline_id) {
-      dealId = await createDeal(ctx.token, {
+      dealId = await api.createDeal(ctx.token, {
         name: dealName(ctx.dealTemplate, event),
         pipelineId: ctx.settings.pipeline_id,
         stageId: plan.stageId
       });
       updates.crmDealId = dealId;
-      await associateDefault(ctx.token, "deals", dealId, "contacts", contactId);
       dealSummary = "Deal created.";
+    }
+    if (dealId) {
+      step = "deal association";
+      await api.associateDefault(ctx.token, "deals", dealId, "contacts", contactId);
     }
 
     step = "note";
-    const noteId = await createNote(ctx.token, { timestamp: event.created_at, body: noteBody(event) });
-    await associateDefault(ctx.token, "notes", noteId, "contacts", contactId);
-    if (dealId) await associateDefault(ctx.token, "notes", noteId, "deals", dealId);
+    const noteId = await api.createNote(ctx.token, { timestamp: event.created_at, body: noteBody(event) });
+    await api.associateDefault(ctx.token, "notes", noteId, "contacts", contactId);
+    let noteSummary = "Note added.";
+    if (dealId) {
+      try {
+        await api.associateDefault(ctx.token, "notes", noteId, "deals", dealId);
+      } catch (error) {
+        console.error("[hubspot] note to deal link failed", statusOf(error) ?? "unknown");
+        noteSummary = "Note added to the contact, not linked to the deal.";
+      }
+    }
 
-    return { outcome: "sent", httpStatus: 200, summary: `Contact ${contactId} updated. ${dealSummary} Note added.`, updates };
+    return { outcome: "sent", httpStatus: 200, summary: `Contact ${contactId} updated. ${dealSummary} ${noteSummary}`, updates };
   } catch (error) {
     const status = statusOf(error);
     await onAuthFailure(ctx, status);

@@ -47,6 +47,8 @@ export const CALENDLY_COPY = {
   refusedUpgrade: "Calendly refused booking notifications for this account: Please upgrade to a paid Calendly account.",
   refused: "Calendly refused booking notifications for this account.",
   setupFailed: "Booking notifications could not be set up. Choose Set up confirmations to try again.",
+  setupTemporaryFailure:
+    "Calendly did not answer, so nothing was changed on this connection. Choose Set up confirmations to try again in a few minutes.",
   tokenNoLongerAccepted: "Calendly no longer accepts the access token. Paste a new token on this connection.",
   checkOk: "Calendly accepted the access token.",
   checkFailed: "Calendly did not answer. Please try again later.",

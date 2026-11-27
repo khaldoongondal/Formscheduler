@@ -5,6 +5,7 @@
  * analytics, split tests, Meta events and CRM events.
  */
 import { PublicError } from "@/lib/api/responses";
+import { ALREADY_BOOKED_MESSAGE, BOOKING_IN_PROGRESS_MESSAGE, holdConflict, type HoldRow } from "@/lib/bookings/booking-guard";
 import { buildBookingDescription } from "@/lib/bookings/outcome-plan";
 import { createOutcomeRecorder } from "@/lib/bookings/outcomes";
 import { SLOT_TAKEN_MESSAGE } from "@/lib/connections/copy";
@@ -60,7 +61,49 @@ async function recordSafely(run: () => Promise<unknown>) {
   }
 }
 
+const HOLD_COLUMNS = "id, lead_session_id, calendar_connection_id, slot_start, slot_end, status";
+
+/** Other live holds for this lead, and on this connection near this time (tenant scoped). */
+async function findHoldConflict(
+  session: LeadSession,
+  self: HoldRow,
+  connectionId: string | null,
+  padding: { beforeMs: number; afterMs: number }
+) {
+  const supabase = createServiceClient();
+  const live = ["pending", "booked"];
+  const byLead = await supabase
+    .from("booking_attempts")
+    .select(HOLD_COLUMNS)
+    .eq("tenant_id", session.tenant_id)
+    .eq("lead_session_id", session.id)
+    .in("status", live)
+    .neq("id", self.id)
+    .limit(20);
+  if (byLead.error) throw new Error(byLead.error.message);
+  const rows = [...((byLead.data ?? []) as HoldRow[])];
+  const startMs = self.slot_start ? new Date(self.slot_start).getTime() : NaN;
+  const endMs = self.slot_end ? new Date(self.slot_end).getTime() : NaN;
+  if (connectionId && Number.isFinite(startMs) && Number.isFinite(endMs)) {
+    const nearby = await supabase
+      .from("booking_attempts")
+      .select(HOLD_COLUMNS)
+      .eq("tenant_id", session.tenant_id)
+      .eq("calendar_connection_id", connectionId)
+      .in("status", live)
+      .neq("id", self.id)
+      .lt("slot_start", new Date(endMs + padding.afterMs).toISOString())
+      .gt("slot_end", new Date(startMs - padding.beforeMs).toISOString())
+      .limit(20);
+    if (nearby.error) throw new Error(nearby.error.message);
+    rows.push(...((nearby.data ?? []) as HoldRow[]));
+  }
+  return holdConflict(self, rows, padding);
+}
+
 export async function genericGetAvailableSlots(session: LeadSession, funnel: Funnel, parsed: SlotLookupInput) {
+  // A booked lead is never offered times again, so a reload cannot book twice.
+  if (session.status === "booked") throw new PublicError(ALREADY_BOOKED_MESSAGE, 409);
   const recorder = createOutcomeRecorder();
   const provider = calendarKindOf(funnel);
   const base = {
@@ -112,6 +155,7 @@ export async function genericBookAppointment(
   funnel: Funnel,
   parsed: BookAppointmentInput
 ): Promise<{ attempt: BookingAttempt; metaEvents: Array<QueuedMetaEvent | null> }> {
+  if (session.status === "booked") throw new PublicError(ALREADY_BOOKED_MESSAGE, 409);
   const recorder = createOutcomeRecorder();
   const provider = calendarKindOf(funnel);
 
@@ -132,19 +176,28 @@ export async function genericBookAppointment(
     throw new PublicError(INVALID_SLOT_MESSAGE, 400);
   }
 
+  const padding = resolved.provider.bookingPadding?.(resolved.ctx) ?? { beforeMs: 0, afterMs: 0 };
   const supabase = createServiceClient();
+  const staleBefore = new Date(Date.now() - STALE_PENDING_MS).toISOString();
   if (resolved.connectionId) {
-    // Decision C13: a pending hold older than 5 minutes for this start no longer blocks it.
+    // Decision C13: a pending hold older than 5 minutes no longer blocks anything on this connection.
     const { error: staleError } = await supabase
       .from("booking_attempts")
       .update({ status: "error", error_code: "stale", error_message: "Abandoned pending booking." })
       .eq("tenant_id", session.tenant_id)
       .eq("calendar_connection_id", resolved.connectionId)
-      .eq("slot_start", parsed.slot_start)
       .eq("status", "pending")
-      .lt("created_at", new Date(Date.now() - STALE_PENDING_MS).toISOString());
+      .lt("created_at", staleBefore);
     if (staleError) console.error("[bookings] stale hold cleanup failed", staleError.code ?? "unknown");
   }
+  const { error: staleLeadError } = await supabase
+    .from("booking_attempts")
+    .update({ status: "error", error_code: "stale", error_message: "Abandoned pending booking." })
+    .eq("tenant_id", session.tenant_id)
+    .eq("lead_session_id", session.id)
+    .eq("status", "pending")
+    .lt("created_at", staleBefore);
+  if (staleLeadError) console.error("[bookings] stale lead hold cleanup failed", staleLeadError.code ?? "unknown");
   const { data: attempt, error: attemptError } = await supabase
     .from("booking_attempts")
     .insert({
@@ -167,6 +220,27 @@ export async function genericBookAppointment(
   if (attemptError) {
     if (attemptError.code === "23505") throw new PublicError(SLOT_TAKEN_MESSAGE, 409);
     throw new Error(attemptError.message);
+  }
+
+  // Insert-then-check (booking-guard.ts): overlapping or buffer-adjacent holds on this
+  // connection, and a second booking for this lead, yield before anything reaches the provider.
+  let conflict;
+  try {
+    conflict = await findHoldConflict(session, attempt as HoldRow, resolved.connectionId, padding);
+  } catch (error) {
+    conflict = "check_failed" as const;
+    console.error("[bookings] hold check failed", error instanceof Error ? error.name : "unknown");
+  }
+  if (conflict) {
+    await supabase
+      .from("booking_attempts")
+      .update({ status: "error", error_code: "conflict", error_message: conflict })
+      .eq("id", attempt.id)
+      .eq("tenant_id", session.tenant_id);
+    if (conflict === "already_booked") throw new PublicError(ALREADY_BOOKED_MESSAGE, 409);
+    if (conflict === "in_progress") throw new PublicError(BOOKING_IN_PROGRESS_MESSAGE, 409);
+    if (conflict === "check_failed") throw new Error("hold_check_failed");
+    throw new PublicError(SLOT_TAKEN_MESSAGE, 409);
   }
 
   const lead = leadIdentity(session);
@@ -219,19 +293,25 @@ export async function genericBookAppointment(
     .single();
   if (updateAttemptError) console.error("[bookings] booked attempt update failed", updateAttemptError.code ?? "unknown");
 
-  const { metaEvents } = await recorder.record("booked", session, funnel, {
-    provider,
-    externalBookingId: result.externalBookingId,
-    confirmationRequired: result.confirmationRequired,
-    booking: {
+  // The recorder isolates its follow-up steps; this catch is the last guard so the visitor still sees the booking.
+  let metaEvents: Array<QueuedMetaEvent | null> = [];
+  try {
+    ({ metaEvents } = await recorder.record("booked", session, funnel, {
       provider,
-      start: result.startTime,
-      end: result.endTime,
-      timezone: parsed.timezone,
-      externalId: result.externalBookingId,
-      meetingUrl: result.meetingUrl
-    }
-  });
+      externalBookingId: result.externalBookingId,
+      confirmationRequired: result.confirmationRequired,
+      booking: {
+        provider,
+        start: result.startTime,
+        end: result.endTime,
+        timezone: parsed.timezone,
+        externalId: result.externalBookingId,
+        meetingUrl: result.meetingUrl
+      }
+    }));
+  } catch (error) {
+    console.error("[bookings] booked outcome record failed", error instanceof Error ? error.name : "unknown");
+  }
 
   return { attempt: updatedAttempt ?? attempt, metaEvents };
 }

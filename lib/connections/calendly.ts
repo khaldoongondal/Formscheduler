@@ -85,6 +85,11 @@ function statusOf(error: unknown) {
   return error instanceof ProviderHttpError ? error.status : null;
 }
 
+/** Network errors and timeouts (no status), rate limits and server errors may pass on their own. */
+export function isTemporaryFailure(status: number | null): boolean {
+  return status === null || status === 408 || status === 429 || status >= 500;
+}
+
 /** Fixed messages for the create and replace forms. */
 export async function verifyCalendlyToken(token: string) {
   try {
@@ -107,15 +112,26 @@ export async function setupCalendlyConfirmations(row: ConnectionRow): Promise<{ 
   const { userUri, organizationUri } = calendlySettings(row);
   const callbackUrl = calendlyWebhookUrl(row.id);
 
-  const fail = async (message: string) => {
+  // True once the subscription that signs with the stored key is known to be gone at Calendly.
+  let oldSubscriptionGone = !row.signing_secret_ciphertext;
+
+  /**
+   * The stored signing key is cleared only when its subscription is gone,
+   * since that subscription still signs live webhooks with it. A temporary
+   * failure (network, timeout, 429 or 5xx) before anything changed at
+   * Calendly leaves the connection exactly as it was.
+   */
+  const fail = async (message: string, options: { temporary?: boolean } = {}) => {
+    if (options.temporary && !oldSubscriptionGone) {
+      return { ok: false, message: CALENDLY_COPY.setupTemporaryFailure };
+    }
     const nextSettings = { ...settings };
-    delete nextSettings.webhook_subscription_uri;
+    if (oldSubscriptionGone) delete nextSettings.webhook_subscription_uri;
     await supabase
       .from("connections")
       .update({
         settings: nextSettings as Json,
-        signing_secret_ciphertext: null,
-        signing_secret_last_four: null,
+        ...(oldSubscriptionGone ? { signing_secret_ciphertext: null, signing_secret_last_four: null } : {}),
         ...(row.status === "disabled" ? {} : { status: "needs_attention" as const, status_message: message.slice(0, 300) })
       })
       .eq("id", row.id)
@@ -136,14 +152,14 @@ export async function setupCalendlyConfirmations(row: ConnectionRow): Promise<{ 
   const signingKey = randomBytes(32).toString("base64url");
   try {
     // Old subscriptions for our address carry a key we no longer know.
+    // A delete that fails stops here, so the old key is kept while its subscription may still exist.
     const existing = await listWebhookSubscriptions(token, { organization: organizationUri, user: userUri });
     for (const subscription of existing) {
       if (subscription.callbackUrl === callbackUrl) {
-        await deleteWebhookSubscription(token, subscription.uri).catch(() => {
-          console.error("[calendly] old subscription delete failed");
-        });
+        await deleteWebhookSubscription(token, subscription.uri);
       }
     }
+    oldSubscriptionGone = true;
     const subscription = await createWebhookSubscription(token, {
       url: callbackUrl,
       organization: organizationUri,
@@ -170,7 +186,7 @@ export async function setupCalendlyConfirmations(row: ConnectionRow): Promise<{ 
       const message = error instanceof Error ? error.message : "";
       return fail(isUpgradeRefusal(message) ? CALENDLY_COPY.refusedUpgrade : CALENDLY_COPY.refused);
     }
-    return fail(CALENDLY_COPY.setupFailed);
+    return fail(CALENDLY_COPY.setupFailed, { temporary: isTemporaryFailure(status) });
   }
 }
 
@@ -215,6 +231,13 @@ export async function loadCalendlyEventTypes(tenantId: string, connectionId: str
  * connection, migration 0031). Another booking at the same start (a group
  * event) cannot get a row under the 0030 slot index; the lead is then still
  * recorded as booked without a booking_attempts row.
+ *
+ * A repeat confirmation (webhook retry, or the other source) always re-reads
+ * the lead and runs the recorder again: if the first run stopped after the
+ * attempt row was written, the retry finishes the job. The recorder's atomic
+ * booked transition keeps it to one recording per lead. Throws when the
+ * booked status could not be saved, so the webhook answers 500 and Calendly
+ * retries.
  */
 export async function recordCalendlyBooking(input: {
   funnel: Funnel;
@@ -248,17 +271,17 @@ export async function recordCalendlyBooking(input: {
 
   if (error) {
     if (error.code !== "23505") throw new Error(error.message);
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from("booking_attempts")
       .select("id")
       .eq("tenant_id", session.tenant_id)
       .eq("calendar_connection_id", connectionId)
       .eq("external_booking_id", invitee.uri)
       .maybeSingle();
-    if (existing) return { attempt: null, metaEvents: [] };
-    console.error("[calendly] booking recorded without attempt row");
-    // No row guards this lead, so the other confirmation source may already have recorded it:
-    // read the current status so the recorder's booked-once rule sees it (P4.5 item 4).
+    if (existingError) throw new Error(existingError.message);
+    if (!existing) console.error("[calendly] booking recorded without attempt row");
+    // The other confirmation source, or an earlier run that stopped part way, wrote the row:
+    // read the current status so the recorder records the booking only if it is still missing.
     const { data: fresh, error: freshError } = await supabase
       .from("lead_sessions")
       .select("*")
@@ -270,7 +293,7 @@ export async function recordCalendlyBooking(input: {
   }
 
   const recorder = createOutcomeRecorder();
-  const { metaEvents } = await recorder.record("booked", session, funnel, {
+  const { metaEvents, incomplete } = await recorder.record("booked", session, funnel, {
     provider: "calendly",
     externalBookingId: invitee.uri,
     booking: {
@@ -282,6 +305,7 @@ export async function recordCalendlyBooking(input: {
       meetingUrl: null
     }
   });
+  if (incomplete) throw new Error("calendly_booked_status_not_saved");
   return { attempt: attempt ?? null, metaEvents };
 }
 

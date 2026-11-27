@@ -98,6 +98,12 @@ export const googleCalendarProvider: CalendarProvider<GoogleCalendarCtx> = {
     const busy = await busyNow(ctx, request.nowMs);
     return generateSlots({ availability: ctx.availability, busy, nowMs: request.nowMs, displayTimezone: request.timezone });
   },
+  bookingPadding(ctx) {
+    return {
+      beforeMs: ctx.availability.buffer_before_minutes * 60_000,
+      afterMs: ctx.availability.buffer_after_minutes * 60_000
+    };
+  },
   async book(ctx, request) {
     // Decision C13: free/busy again right before the insert; the start must still be offered.
     const nowMs = Date.now();

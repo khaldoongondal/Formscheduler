@@ -84,6 +84,8 @@ export interface CalendarProvider<Ctx = unknown> {
   mode: "slots" | "embed";
   listSlots?(ctx: Ctx, request: SlotRequest): Promise<Slot[]>;
   book?(ctx: Ctx, request: BookRequest): Promise<BookingResult>;
+  /** Gaps the calendar keeps around each booking; overlapping FormBook holds count within them. */
+  bookingPadding?(ctx: Ctx): { beforeMs: number; afterMs: number };
   embed?(ctx: Ctx, lead: LeadIdentity, tracking: Record<string, string>): Promise<EmbedSpec>;
 }
 
