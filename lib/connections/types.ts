@@ -103,7 +103,8 @@ export type CrmDeliveryOutcome = {
   httpStatus: number | null;
   /** At most 500 characters, never a token; shown in the delivery log. */
   summary: string;
-  updates?: { crmContactId?: string; crmDealId?: string; ghlContactId?: string; ghlOpportunityId?: string };
+  /** `crmDealId: null` means the stored deal no longer exists in the CRM and is cleared. */
+  updates?: { crmContactId?: string; crmDealId?: string | null; ghlContactId?: string; ghlOpportunityId?: string };
 };
 
 export interface CrmProvider<Ctx = unknown> {

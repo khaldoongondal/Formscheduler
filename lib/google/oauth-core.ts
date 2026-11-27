@@ -2,7 +2,7 @@
  * Google Calendar sign-in helpers (P2.5). Keys and env values are arguments.
  * Pure: no Next.js, Supabase or I/O imports.
  */
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -163,7 +163,16 @@ export function parseExtraOrigins(value: string | undefined | null): string[] {
     .filter(Boolean);
 }
 
-/** Google event ids use base32hex characters (a-v, 0-9), 5 to 1024 long. A uuid's hex fits. */
-export function googleEventIdFor(attemptId: string): string {
-  return `fb${attemptId.toLowerCase().replace(/[^0-9a-f]/g, "")}`;
+/**
+ * Google event ids use base32hex characters (a-v, 0-9), 5 to 1024 long; hex fits.
+ * The id derives from the connection, the lead's reference and the start time,
+ * not the booking attempt, so a second attempt at the same time for the same
+ * lead (after a lost response) finds the event it already made instead of
+ * creating a second one.
+ */
+export function googleEventIdFor(input: { connectionId: string; externalRef: string; slotStart: string }): string {
+  const startMs = Date.parse(input.slotStart);
+  const start = Number.isFinite(startMs) ? new Date(startMs).toISOString() : input.slotStart;
+  const digest = createHash("sha256").update(`${input.connectionId.toLowerCase()}|${input.externalRef.toLowerCase()}|${start}`).digest("hex");
+  return `fb${digest}`;
 }

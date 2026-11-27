@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   ALREADY_BOOKED_MESSAGE,
+  BOOKED_HOLD_MS,
   holdConflict,
   publicAttempt,
   type HoldRow
@@ -252,6 +253,27 @@ describe("holdConflict (overlapping and buffer-adjacent bookings)", () => {
     assert.equal(holdConflict(self, [{ ...self }]), null);
   });
 
+  it("another lead's booked row holds its time only briefly (cancellations are not tracked)", () => {
+    const now = Date.parse("2026-12-01T09:00:00Z");
+    const fresh = other({ status: "booked", updated_at: new Date(now - 60_000).toISOString() });
+    const old = other({ status: "booked", updated_at: new Date(now - BOOKED_HOLD_MS - 1).toISOString() });
+    assert.equal(holdConflict(self, [fresh], undefined, now), "slot_taken");
+    assert.equal(holdConflict(self, [old], undefined, now), null);
+    assert.equal(holdConflict(self, [other({ status: "booked" })], undefined, now), null);
+    // The same lead's booked row always counts, however old.
+    assert.equal(holdConflict(self, [{ ...old, lead_session_id: SESSION_ID }], undefined, now), "already_booked");
+  });
+
+  it("migration 0030 never makes a booked row a permanent unique hold", () => {
+    const sql = source("supabase", "migrations", "0030_calendar_booking_guard.sql");
+    const unique = sql.match(/create unique index[^;]*;/gi) ?? [];
+    assert.equal(unique.length, 1);
+    assert.match(unique[0], /status = 'pending'/);
+    assert.doesNotMatch(unique[0], /booked/);
+    const generic = source("lib", "bookings", "generic-path.ts");
+    assert.match(generic, /bookedHoldSince\(/);
+  });
+
   it("a second booking for the same lead is refused", () => {
     const later = other({ lead_session_id: SESSION_ID, calendar_connection_id: "x", slot_start: "2026-12-02T10:00:00Z", slot_end: "2026-12-02T10:30:00Z" });
     assert.equal(holdConflict(self, [{ ...later, status: "booked" }]), "already_booked");
@@ -345,6 +367,38 @@ describe("HubSpot retries after a partial failure", () => {
     assert.equal(second.outcome, "sent");
     assert.ok(calls.includes("assoc:deals:d1->contacts:c1"));
     assert.equal(calls.filter((call) => call === "deal:create").length, 1);
+    assert.equal(calls.filter((call) => call.startsWith("note:create")).length, 1);
+  });
+
+  it("an event that does not touch the deal still writes the note when the deal was deleted", async () => {
+    const { api, calls } = fakeApi({ count: 0 });
+    const original = api.associateDefault;
+    api.associateDefault = async (token, fromType, fromId, toType, toId) => {
+      if (fromId === "gone") throw new ProviderHttpError("hubspot", 404, false, "not found");
+      return original(token, fromType, fromId, toType, toId);
+    };
+    const state = { crmContactId: "c1", crmDealId: "gone", ghlContactId: null, ghlOpportunityId: null };
+    // lead.captured with a deal already stored: plan "none".
+    const result = await deliverToHubspot(ctx, hubspotEvent("lead.captured"), state, api);
+    assert.equal(result.outcome, "sent");
+    assert.equal(result.updates?.crmDealId, null);
+    assert.equal(calls.filter((call) => call.startsWith("note:create")).length, 1);
+    assert.ok(calls.includes("assoc:notes:n1->contacts:c1"));
+    assert.ok(!calls.some((call) => call.includes("->deals:gone")));
+  });
+
+  it("a failed deal link on an untouched deal never blocks the note", async () => {
+    const { api, calls } = fakeApi({ count: 5 });
+    const noDealOnBooked: HubspotCtx = { ...ctx, settings: { ...ctx.settings, deal_on_booked: false } };
+    const result = await deliverToHubspot(
+      noDealOnBooked,
+      hubspotEvent("lead.booked"),
+      { crmContactId: "c1", crmDealId: "d1", ghlContactId: null, ghlOpportunityId: null },
+      api
+    );
+    assert.equal(result.outcome, "sent");
+    assert.match(result.summary, /Deal not linked to the contact/);
+    assert.equal(result.updates?.crmDealId, undefined);
     assert.equal(calls.filter((call) => call.startsWith("note:create")).length, 1);
   });
 

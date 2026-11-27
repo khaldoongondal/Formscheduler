@@ -21,7 +21,18 @@ export function publicAttempt(attempt: BookingAttempt | null | undefined): Publi
   };
 }
 
-export type HoldRow = Pick<BookingAttempt, "id" | "lead_session_id" | "calendar_connection_id" | "slot_start" | "slot_end" | "status">;
+export type HoldRow = Pick<BookingAttempt, "id" | "lead_session_id" | "calendar_connection_id" | "slot_start" | "slot_end" | "status"> & {
+  updated_at?: string | null;
+};
+
+/**
+ * How long another lead's booked row still holds its time on the connection.
+ * Cancellations on Google and Cal.com are not tracked (decision C27), so a
+ * booked row is never a permanent hold: after this window the provider's own
+ * check (Google free/busy before the insert, Cal.com's slot error) decides.
+ * The window only covers the short lag before a new event shows as busy.
+ */
+export const BOOKED_HOLD_MS = 180_000;
 
 export type HoldConflict = "already_booked" | "in_progress" | "slot_taken" | null;
 
@@ -39,12 +50,14 @@ function timeOf(value: string | null | undefined): number | null {
  *
  * A conflict is another pending or booked hold for the same lead, or one on
  * the same calendar connection whose time overlaps this one widened by the
- * calendar's buffers.
+ * calendar's buffers. On the connection, another lead's booked row counts
+ * only while it was booked within BOOKED_HOLD_MS.
  */
 export function holdConflict(
   self: HoldRow,
   others: HoldRow[],
-  padding: { beforeMs: number; afterMs: number } = { beforeMs: 0, afterMs: 0 }
+  padding: { beforeMs: number; afterMs: number } = { beforeMs: 0, afterMs: 0 },
+  nowMs: number = Date.now()
 ): HoldConflict {
   const start = timeOf(self.slot_start);
   const end = timeOf(self.slot_end);
@@ -57,6 +70,7 @@ export function holdConflict(
       continue;
     }
     if (!self.calendar_connection_id || other.calendar_connection_id !== self.calendar_connection_id) continue;
+    if (other.status === "booked" && !isRecentBooking(other, nowMs)) continue;
     const otherStart = timeOf(other.slot_start);
     const otherEnd = timeOf(other.slot_end);
     if (start === null || end === null || otherStart === null || otherEnd === null) continue;
@@ -65,4 +79,15 @@ export function holdConflict(
     }
   }
   return result;
+}
+
+/** True while a booked row is young enough to still hold its time (see BOOKED_HOLD_MS). */
+export function isRecentBooking(row: Pick<HoldRow, "updated_at">, nowMs: number): boolean {
+  const at = timeOf(row.updated_at);
+  return at !== null && at >= nowMs - BOOKED_HOLD_MS;
+}
+
+/** The updated_at cut-off for booked rows that still hold their time. */
+export function bookedHoldSince(nowMs: number): string {
+  return new Date(nowMs - BOOKED_HOLD_MS).toISOString();
 }

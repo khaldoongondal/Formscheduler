@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   GOOGLE_SCOPES,
   GOOGLE_STATE_TTL_MS,
@@ -19,6 +21,7 @@ import {
   buildGoogleEventBody,
   eventFormbookRef,
   googleEventPath,
+  ownLiveEvent,
   parseFreeBusy,
   parseGoogleEvent
 } from "@/lib/google/event-mapping";
@@ -180,14 +183,40 @@ describe("Google events", () => {
     phone: "+14165550100"
   };
 
-  it("event ids are base32hex and derive from the attempt", () => {
-    const id = googleEventIdFor(attemptId);
-    assert.match(id, /^[a-v0-9]{5,1024}$/);
-    assert.equal(id, googleEventIdFor(attemptId.toUpperCase()));
+  const connectionId = "22222222-2222-4222-8222-222222222222";
+  const eventId = googleEventIdFor({ connectionId, externalRef: lead.externalRef, slotStart: "2026-01-12T14:00:00.000Z" });
+
+  it("event ids are base32hex and stable for the same connection, lead and start, whatever the attempt", () => {
+    assert.match(eventId, /^[a-v0-9]{5,1024}$/);
+    // Same instant written another way, and upper case ids: same event id.
+    assert.equal(
+      eventId,
+      googleEventIdFor({ connectionId: connectionId.toUpperCase(), externalRef: lead.externalRef.toUpperCase(), slotStart: "2026-01-12T09:00:00-05:00" })
+    );
+    assert.notEqual(eventId, googleEventIdFor({ connectionId, externalRef: lead.externalRef, slotStart: "2026-01-12T14:30:00.000Z" }));
+    assert.notEqual(eventId, googleEventIdFor({ connectionId, externalRef: "ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee", slotStart: "2026-01-12T14:00:00.000Z" }));
+    assert.notEqual(eventId, googleEventIdFor({ connectionId: "33333333-3333-4333-8333-333333333333", externalRef: lead.externalRef, slotStart: "2026-01-12T14:00:00.000Z" }));
+  });
+
+  it("only this lead's live event counts as the existing booking", () => {
+    const fallback = { slotStart: "2026-01-12T14:00:00.000Z", slotEnd: "2026-01-12T14:30:00.000Z" };
+    const event = { id: eventId, status: "confirmed", extendedProperties: { private: { formbook_ref: lead.externalRef } } };
+    assert.equal(ownLiveEvent(event, lead.externalRef, fallback)?.externalBookingId, eventId);
+    assert.equal(ownLiveEvent({ ...event, status: "cancelled" }, lead.externalRef, fallback), null);
+    assert.equal(ownLiveEvent(event, "someone-else", fallback), null);
+    assert.equal(ownLiveEvent(null, lead.externalRef, fallback), null);
+  });
+
+  it("a busy time that is this lead's own event is looked up before refusing it", () => {
+    const text = readFileSync(path.join(process.cwd(), "lib", "connections", "google-calendar.ts"), "utf8");
+    const refuse = text.indexOf("throw new SlotTakenError()");
+    assert.ok(text.indexOf("findOwnEvent(") > 0 && text.indexOf("findOwnEvent(") < refuse);
+    assert.ok(!/googleEventIdFor\(\s*request\.attemptId/.test(text));
   });
 
   it("builds the event body", () => {
     const body = buildGoogleEventBody({
+      eventId,
       attemptId,
       slotStart: "2026-01-12T14:00:00.000Z",
       slotEnd: "2026-01-12T14:30:00.000Z",
@@ -197,7 +226,7 @@ describe("Google events", () => {
       description: "Booked through FormBook.",
       meet: true
     });
-    assert.equal(body.id, googleEventIdFor(attemptId));
+    assert.equal(body.id, eventId);
     assert.equal(body.summary, "Call with Test Lead");
     assert.deepEqual(body.start, { dateTime: "2026-01-12T14:00:00.000Z", timeZone: "America/Toronto" });
     assert.deepEqual(body.attendees, [{ email: "test@example.com", displayName: "Test Lead" }]);
@@ -206,6 +235,7 @@ describe("Google events", () => {
     assert.ok(!JSON.stringify(body).includes("+14165550100"));
 
     const plain = buildGoogleEventBody({
+      eventId,
       attemptId,
       slotStart: "2026-01-12T14:00:00.000Z",
       slotEnd: "2026-01-12T14:30:00.000Z",

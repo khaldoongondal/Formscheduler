@@ -39,9 +39,10 @@ export async function applyCrmUpdates(
   ghlConnectionId?: string | null
 ): Promise<void> {
   if (!updates) return;
-  const patch: Record<string, string> = {};
+  const patch: Record<string, string | null> = {};
   if (updates.crmContactId) patch.crm_contact_id = updates.crmContactId.slice(0, 200);
   if (updates.crmDealId) patch.crm_deal_id = updates.crmDealId.slice(0, 200);
+  else if (updates.crmDealId === null) patch.crm_deal_id = null;
   if (updates.ghlContactId) patch.ghl_contact_id = updates.ghlContactId;
   if (updates.ghlOpportunityId) patch.ghl_opportunity_id = updates.ghlOpportunityId;
   if (!Object.keys(patch).length) return;

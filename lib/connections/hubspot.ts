@@ -106,12 +106,14 @@ async function onAuthFailure(ctx: HubspotCtx, status: number | null) {
 }
 
 /**
- * Every step is safe to repeat on a retry: the contact is found again, the
- * deal id comes back in `updates`, and the default deal to contact
- * association (a PUT) is made on every delivery that has a deal, so a deal
- * whose association failed last time is linked now. The note is created and
- * linked to the contact before anything else can fail; linking it to the
- * deal is best effort, so a retry never adds a second visible note.
+ * Every step is safe to repeat on a retry: the contact is found again and
+ * the deal id comes back in `updates`. Right after a deal is created its
+ * link to the contact must succeed (a failure retries before any note is
+ * written). On every other delivery with a deal the link (an idempotent PUT)
+ * is best effort, so a deal whose link failed last time is linked now, a
+ * deal deleted in HubSpot (404) is forgotten, and neither ever blocks the
+ * contact note. Linking the note to the deal is best effort too, so a retry
+ * never adds a second visible note.
  */
 export async function deliverToHubspot(
   ctx: HubspotCtx,
@@ -129,6 +131,7 @@ export async function deliverToHubspot(
     step = "deal";
     let dealId = lead.crmDealId;
     let dealSummary = "No deal.";
+    let dealCreated = false;
     let plan = dealPlan(event, ctx.settings, Boolean(dealId));
     if (plan.action === "move" && dealId) {
       try {
@@ -148,11 +151,28 @@ export async function deliverToHubspot(
         stageId: plan.stageId
       });
       updates.crmDealId = dealId;
+      dealCreated = true;
       dealSummary = "Deal created.";
     }
-    if (dealId) {
+    if (dealId && dealCreated) {
       step = "deal association";
       await api.associateDefault(ctx.token, "deals", dealId, "contacts", contactId);
+    } else if (dealId) {
+      try {
+        await api.associateDefault(ctx.token, "deals", dealId, "contacts", contactId);
+      } catch (error) {
+        const status = statusOf(error);
+        await onAuthFailure(ctx, status);
+        if (status === 404) {
+          // The deal was deleted in HubSpot: forget it so later events stop trying.
+          dealId = null;
+          updates.crmDealId = null;
+          dealSummary = "Deal no longer in HubSpot.";
+        } else {
+          console.error("[hubspot] deal to contact link failed", status ?? "unknown");
+          dealSummary = `${dealSummary} Deal not linked to the contact.`;
+        }
+      }
     }
 
     step = "note";

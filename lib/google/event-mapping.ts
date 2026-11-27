@@ -4,7 +4,6 @@
  */
 import type { BookingResult, LeadIdentity } from "@/lib/connections/types";
 import type { BusyInterval } from "@/lib/google/availability";
-import { googleEventIdFor } from "@/lib/google/oauth-core";
 
 export const GOOGLE_CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3";
 
@@ -33,6 +32,8 @@ function leadDisplayName(lead: LeadIdentity): string | null {
 }
 
 export function buildGoogleEventBody(input: {
+  /** From googleEventIdFor: stable for the same connection, lead and start time. */
+  eventId: string;
   attemptId: string;
   slotStart: string;
   slotEnd: string;
@@ -46,7 +47,7 @@ export function buildGoogleEventBody(input: {
   const who = name ?? input.lead.email ?? input.lead.phone ?? "a new lead";
   const summary = (input.title?.trim() || `Call with ${who}`).slice(0, 300);
   const body: Record<string, unknown> = {
-    id: googleEventIdFor(input.attemptId),
+    id: input.eventId,
     summary,
     description: input.description,
     start: { dateTime: input.slotStart, timeZone: input.timezone },
@@ -73,6 +74,16 @@ export function eventFormbookRef(body: unknown): string | null {
   const ref = (body as { extendedProperties?: { private?: { formbook_ref?: unknown } } } | null)?.extendedProperties?.private
     ?.formbook_ref;
   return typeof ref === "string" ? ref : null;
+}
+
+/**
+ * Our own live event for this lead, or null: an event whose FormBook
+ * reference differs, or that was cancelled, never counts as this booking.
+ */
+export function ownLiveEvent(body: unknown, expectedRef: string, fallback: { slotStart: string; slotEnd: string }): BookingResult | null {
+  if (eventFormbookRef(body) !== expectedRef) return null;
+  if ((body as { status?: unknown } | null)?.status === "cancelled") return null;
+  return parseGoogleEvent(body, fallback);
 }
 
 export function parseGoogleEvent(body: unknown, fallback: { slotStart: string; slotEnd: string }): BookingResult | null {

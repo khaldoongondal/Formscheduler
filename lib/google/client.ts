@@ -7,8 +7,8 @@ import { SlotTakenError, type BookingResult } from "@/lib/connections/types";
 import type { BusyInterval } from "@/lib/google/availability";
 import {
   GOOGLE_CALENDAR_API_BASE,
-  eventFormbookRef,
   googleEventPath,
+  ownLiveEvent,
   parseFreeBusy,
   parseGoogleEvent
 } from "@/lib/google/event-mapping";
@@ -41,9 +41,29 @@ export async function getEvent(token: string, calendarId: string, eventId: strin
 }
 
 /**
- * Creates the event. The event id derives from the booking attempt, so a
- * retried insert returns 409; the existing event is used when it is ours,
- * otherwise the time counts as taken (U4).
+ * The event this lead already has at this time (same stable id), or null.
+ * Used when free/busy shows the time as busy, which our own event from an
+ * earlier attempt whose response was lost also does.
+ */
+export async function findOwnEvent(
+  token: string,
+  calendarId: string,
+  eventId: string,
+  expectedRef: string,
+  fallback: { slotStart: string; slotEnd: string }
+): Promise<BookingResult | null> {
+  try {
+    return ownLiveEvent(await getEvent(token, calendarId, eventId), expectedRef, fallback);
+  } catch (error) {
+    if (error instanceof ProviderHttpError && (error.status === 404 || error.status === 410)) return null;
+    throw error;
+  }
+}
+
+/**
+ * Creates the event. The event id derives from the connection, the lead and
+ * the start time, so a retried insert returns 409; the existing event is used
+ * when it is ours and not cancelled, otherwise the time counts as taken (U4).
  */
 export async function insertEvent(
   token: string,
@@ -64,11 +84,8 @@ export async function insertEvent(
     }));
   } catch (error) {
     if (error instanceof ProviderHttpError && error.status === 409) {
-      const existing = await getEvent(token, calendarId, body.id);
-      if (eventFormbookRef(existing) === expectedRef) {
-        const parsed = parseGoogleEvent(existing, fallback);
-        if (parsed) return parsed;
-      }
+      const own = await findOwnEvent(token, calendarId, body.id, expectedRef, fallback);
+      if (own) return own;
       throw new SlotTakenError();
     }
     throw error;

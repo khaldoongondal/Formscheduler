@@ -17,7 +17,7 @@ Supabase dashboard: Database, Backups, take a manual backup (or `pg_dump` the pr
 If the Sprint 2 migrations (`0025` to `0028`) are not applied yet, apply them first with the Sprint 2 checklist below. Then run, in order:
 
 - `0029_connections.sql` (generic connections, calendar and CRM choice per form, lead reference, booking attempt provider columns). Adding `lead_sessions.external_ref` rewrites that table once.
-- `0030_calendar_booking_guard.sql` (one FormBook booking per calendar connection and start time).
+- `0030_calendar_booking_guard.sql` (one pending FormBook booking per calendar connection and start time; live hold lookup).
 - `0031_crm_deliveries.sql` (the CRM delivery queue and log, one booking row per Calendly invitee).
 
 Each file is additive and safe to run twice. After all three:
@@ -36,7 +36,7 @@ where p.pronamespace = 'public'::regnamespace and r.rolname in ('anon', 'authent
     'retry_crm_delivery', 'crm_housekeeping', 'enforce_connection_cap', 'enforce_funnel_generic_connections')
   and has_function_privilege(r.rolname, p.oid, 'execute');   -- no rows
 select indexname from pg_indexes
-where indexname in ('booking_attempts_connection_slot_uidx', 'booking_attempts_connection_external_uidx',
+where indexname in ('booking_attempts_connection_pending_slot_uidx', 'booking_attempts_connection_external_uidx',
                     'crm_event_deliveries_target_event_uidx');   -- 3 rows
 ```
 

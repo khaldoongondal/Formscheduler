@@ -5,7 +5,13 @@
  * analytics, split tests, Meta events and CRM events.
  */
 import { PublicError } from "@/lib/api/responses";
-import { ALREADY_BOOKED_MESSAGE, BOOKING_IN_PROGRESS_MESSAGE, holdConflict, type HoldRow } from "@/lib/bookings/booking-guard";
+import {
+  ALREADY_BOOKED_MESSAGE,
+  BOOKING_IN_PROGRESS_MESSAGE,
+  bookedHoldSince,
+  holdConflict,
+  type HoldRow
+} from "@/lib/bookings/booking-guard";
 import { buildBookingDescription } from "@/lib/bookings/outcome-plan";
 import { createOutcomeRecorder } from "@/lib/bookings/outcomes";
 import { SLOT_TAKEN_MESSAGE } from "@/lib/connections/copy";
@@ -61,9 +67,13 @@ async function recordSafely(run: () => Promise<unknown>) {
   }
 }
 
-const HOLD_COLUMNS = "id, lead_session_id, calendar_connection_id, slot_start, slot_end, status";
+const HOLD_COLUMNS = "id, lead_session_id, calendar_connection_id, slot_start, slot_end, status, updated_at";
 
-/** Other live holds for this lead, and on this connection near this time (tenant scoped). */
+/**
+ * Other live holds for this lead, and on this connection near this time (tenant scoped).
+ * On the connection only pending rows and rows booked in the last few minutes count:
+ * cancellations are not tracked, so an older booked row must not block its time forever.
+ */
 async function findHoldConflict(
   session: LeadSession,
   self: HoldRow,
@@ -72,6 +82,7 @@ async function findHoldConflict(
 ) {
   const supabase = createServiceClient();
   const live = ["pending", "booked"];
+  const nowMs = Date.now();
   const byLead = await supabase
     .from("booking_attempts")
     .select(HOLD_COLUMNS)
@@ -90,7 +101,7 @@ async function findHoldConflict(
       .select(HOLD_COLUMNS)
       .eq("tenant_id", session.tenant_id)
       .eq("calendar_connection_id", connectionId)
-      .in("status", live)
+      .or(`status.eq.pending,and(status.eq.booked,updated_at.gte."${bookedHoldSince(nowMs)}")`)
       .neq("id", self.id)
       .lt("slot_start", new Date(endMs + padding.afterMs).toISOString())
       .gt("slot_end", new Date(startMs - padding.beforeMs).toISOString())
@@ -98,7 +109,7 @@ async function findHoldConflict(
     if (nearby.error) throw new Error(nearby.error.message);
     rows.push(...((nearby.data ?? []) as HoldRow[]));
   }
-  return holdConflict(self, rows, padding);
+  return holdConflict(self, rows, padding, nowMs);
 }
 
 export async function genericGetAvailableSlots(session: LeadSession, funnel: Funnel, parsed: SlotLookupInput) {

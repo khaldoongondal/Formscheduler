@@ -13,10 +13,11 @@ import {
   parseAvailability,
   type Availability
 } from "@/lib/google/availability";
-import { insertEvent, queryFreeBusy } from "@/lib/google/client";
+import { findOwnEvent, insertEvent, queryFreeBusy } from "@/lib/google/client";
 import { GOOGLE_COPY } from "@/lib/google/copy";
 import { buildGoogleEventBody } from "@/lib/google/event-mapping";
 import { getGoogleAccessToken } from "@/lib/google/oauth";
+import { googleEventIdFor } from "@/lib/google/oauth-core";
 import type { Funnel } from "@/lib/types/database";
 
 export type GoogleCalendarCtx = {
@@ -116,10 +117,19 @@ export const googleCalendarProvider: CalendarProvider<GoogleCalendarCtx> = {
       startIso: request.slotStart,
       endIso: request.slotEnd
     });
-    if (!stillFree) throw new SlotTakenError();
     const slotStart = new Date(request.slotStart).toISOString();
     const slotEnd = new Date(request.slotEnd).toISOString();
+    const eventId = googleEventIdFor({ connectionId: ctx.connectionId, externalRef: request.lead.externalRef, slotStart });
+    if (!stillFree) {
+      // Busy may be this lead's own event from an earlier attempt whose response was lost.
+      const own = await withGoogleToken(ctx, (token) =>
+        findOwnEvent(token, ctx.calendarId, eventId, request.lead.externalRef, { slotStart, slotEnd })
+      );
+      if (own) return own;
+      throw new SlotTakenError();
+    }
     const body = buildGoogleEventBody({
+      eventId,
       attemptId: request.attemptId,
       slotStart,
       slotEnd,
