@@ -74,6 +74,8 @@ export interface GhlConnection {
   company_id: string | null;
   api_base_url: string;
   api_version: string;
+  /** Migration 0024; undefined before it is applied. */
+  use_gondal_attribution_fields?: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -364,6 +366,10 @@ export interface Database {
       rate_limit_hit_capped: {
         Args: { p_bucket_key: string; p_window_seconds: number; p_limit: number };
         Returns: boolean;
+      };
+      rate_limit_release: {
+        Args: { p_bucket_key: string };
+        Returns: undefined;
       };
       get_auth_user_id_by_email: {
         Args: { p_email: string };

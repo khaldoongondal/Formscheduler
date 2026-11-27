@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { PublicError } from "@/lib/api/responses";
 import { findUserIdByEmail, isAuthUserConfirmed } from "@/lib/auth/users";
 import { CONTACT_EMAIL } from "@/lib/billing/plans";
-import { allowEmailSend } from "@/lib/security/rate-limit";
+import { sendWithEmailCooldown, type CooldownSendResult } from "@/lib/security/email-cooldown";
+import { reserveEmailSend } from "@/lib/security/rate-limit";
 import { postGhlWebhook } from "@/lib/signup/ghl-webhook";
 import { createAuthServerClient } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -23,15 +24,22 @@ import {
  *
  * Email goes through GoHighLevel: the server creates the unverified user,
  * generates the verification link itself and POSTs it to the inbound webhook
- * in FORMBOOK_GHL_SIGNUP_WEBHOOK_URL. When that variable is unset, Supabase
- * sends its own email instead so signup still works.
+ * in FORMBOOK_GHL_SIGNUP_WEBHOOK_URL. That variable is required in production.
+ * Outside production, when it is unset, Supabase sends its own email instead
+ * (that link is PKCE-bound and only works in the browser that signed up).
  *
  * The signup form never sets a password. The user is created with a random,
  * unknown password and the verification link leads to /auth/set-password, so
  * the password is chosen only after the owner of the address has proven it.
- * A repeat signup for an unverified address only resends the link: it never
- * changes the password or the stored profile.
+ * A repeat signup for an unverified address never changes the password. It
+ * replaces the stored profile while the signup is still pending (so the real
+ * owner can correct details someone else typed) and resends the link.
+ *
+ * The per-address send cooldown is only kept after a real send: a failed send
+ * gives the slot back, so the retry goes out.
  */
+
+export const SIGNUP_EMAIL_UNAVAILABLE_MESSAGE = `Signup is not available right now. Please email ${CONTACT_EMAIL}.`;
 
 export const VERIFICATION_SEND_FAILED_MESSAGE = `We could not send your verification email. Please try again in a few minutes or email ${CONTACT_EMAIL}.`;
 
@@ -59,10 +67,14 @@ function logSignupError(context: string, error: unknown) {
   console.error(`[signup] ${context}:`, error instanceof Error ? error.message : "unknown error");
 }
 
-/** Stores the profile for a new pending signup. Never overwrites an existing one. */
-async function insertSignupRequestIfMissing(userId: string, input: SignupProfile) {
+/**
+ * Stores the profile for a pending signup. A row that is still pending
+ * (no tenant yet, not completed) takes the latest details; a completed row is
+ * never touched. The password is not part of this and is never set here.
+ */
+async function savePendingSignupProfile(userId: string, input: SignupProfile) {
   const supabase = createServiceClient();
-  const { error } = await supabase.from("signup_requests").upsert(
+  const { error: insertError } = await supabase.from("signup_requests").upsert(
     {
       user_id: userId,
       email: input.email,
@@ -74,7 +86,20 @@ async function insertSignupRequestIfMissing(userId: string, input: SignupProfile
     },
     { onConflict: "user_id", ignoreDuplicates: true }
   );
-  if (error) throw new Error(error.message);
+  if (insertError) throw new Error(insertError.message);
+
+  const { error: updateError } = await supabase
+    .from("signup_requests")
+    .update({
+      full_name: input.name,
+      phone: input.phone,
+      business_name: input.business_name,
+      website: input.website
+    })
+    .eq("user_id", userId)
+    .is("tenant_id", null)
+    .is("completed_at", null);
+  if (updateError) throw new Error(updateError.message);
 }
 
 async function loadSignupProfile(userId: string): Promise<SignupProfile | null> {
@@ -136,22 +161,27 @@ async function sendVerificationThroughSupabase(email: string): Promise<void> {
 }
 
 /**
- * Sends a new verification email. Throws on failure; returns false when there
- * is nothing to send or the per-address cooldown is active.
+ * Sends a new verification email. Throws on failure (the cooldown slot is
+ * given back first). Returns "skipped" when there is nothing to send and
+ * "cooldown" when a link went to this address in the last few minutes.
  */
-async function sendVerification(email: string): Promise<boolean> {
+async function sendVerification(email: string): Promise<CooldownSendResult> {
   const userId = await findUserIdByEmail(email);
-  if (!userId || (await isAuthUserConfirmed(userId))) return false;
-  if (!(await allowEmailSend("signup-email", email))) return false;
+  if (!userId || (await isAuthUserConfirmed(userId))) return "skipped";
 
-  if (isGhlSignupWebhookConfigured()) {
-    const profile = await loadSignupProfile(userId);
-    if (!profile) return false;
-    await sendVerificationThroughGhl(profile);
-  } else {
-    await sendVerificationThroughSupabase(email);
-  }
-  return true;
+  return sendWithEmailCooldown(
+    () => reserveEmailSend("signup-email", email),
+    async () => {
+      if (isGhlSignupWebhookConfigured()) {
+        const profile = await loadSignupProfile(userId);
+        if (!profile) return false;
+        await sendVerificationThroughGhl(profile);
+      } else {
+        await sendVerificationThroughSupabase(email);
+      }
+      return true;
+    }
+  );
 }
 
 /**
@@ -182,10 +212,10 @@ async function handleExistingUser(userId: string, input: SignupInput): Promise<v
     return;
   }
 
-  // Still unverified: only resend the link. The password and the stored
-  // profile are never changed by an unauthenticated request. The profile is
-  // only filled in when none exists yet (a lost race with createUser).
-  await insertSignupRequestIfMissing(userId, input);
+  // Still unverified: the password is never changed by an unauthenticated
+  // request. The pending profile takes the latest details, so the owner of
+  // the address can correct what an earlier signup typed, and the link is resent.
+  await savePendingSignupProfile(userId, input);
   try {
     await sendVerification(input.email);
   } catch (error) {
@@ -195,6 +225,14 @@ async function handleExistingUser(userId: string, input: SignupInput): Promise<v
 }
 
 export async function startSignup(input: SignupInput): Promise<void> {
+  if (!isGhlSignupWebhookConfigured() && process.env.NODE_ENV === "production") {
+    // The Supabase fallback link is PKCE-bound (same browser only) and its
+    // resend link does not reach /auth/confirm in a usable form, so
+    // production needs the GoHighLevel webhook.
+    console.error("[signup] refused: FORMBOOK_GHL_SIGNUP_WEBHOOK_URL is not set in production");
+    throw new PublicError(SIGNUP_EMAIL_UNAVAILABLE_MESSAGE);
+  }
+
   const existingId = await findUserIdByEmail(input.email);
   if (existingId) {
     await handleExistingUser(existingId, input);
@@ -223,10 +261,15 @@ export async function startSignup(input: SignupInput): Promise<void> {
     }
 
     // User and request rows stay even if the email fails, so "send again" works.
-    await insertSignupRequestIfMissing(data.user.id, input);
-    if (!(await allowEmailSend("signup-email", input.email))) return;
+    await savePendingSignupProfile(data.user.id, input);
     try {
-      await sendVerificationThroughGhl(input);
+      await sendWithEmailCooldown(
+        () => reserveEmailSend("signup-email", input.email),
+        async () => {
+          await sendVerificationThroughGhl(input);
+          return true;
+        }
+      );
     } catch (sendError) {
       logSignupError("verification send failed", sendError);
       throw new PublicError(VERIFICATION_SEND_FAILED_MESSAGE);
@@ -234,26 +277,38 @@ export async function startSignup(input: SignupInput): Promise<void> {
     return;
   }
 
-  // Fallback: Supabase sends its own verification email. The link lands on
-  // /auth/confirm?code=..., which the route exchanges (PKCE, same browser).
-  if (!(await allowEmailSend("signup-email", input.email))) return;
-  const auth = await createAuthServerClient();
-  const { data, error } = await auth.auth.signUp({
-    email: input.email,
-    password: unusablePassword(),
-    options: {
-      emailRedirectTo: confirmRedirectUrl(),
-      data: { full_name: input.name }
-    }
-  });
-  if (error) {
+  // Fallback (outside production only): Supabase sends its own verification
+  // email. The link lands on /auth/confirm?code=..., which the route exchanges
+  // (PKCE, same browser). signUp itself sends the email, so the cooldown gates
+  // it, and a failed signUp gives the slot back so the retry creates the user.
+  let newUserId: string | null = null;
+  try {
+    await sendWithEmailCooldown(
+      () => reserveEmailSend("signup-email", input.email),
+      async () => {
+        const auth = await createAuthServerClient();
+        const { data, error } = await auth.auth.signUp({
+          email: input.email,
+          password: unusablePassword(),
+          options: {
+            emailRedirectTo: confirmRedirectUrl(),
+            data: { full_name: input.name }
+          }
+        });
+        if (error) throw new Error(`supabase signUp failed: ${error.message}`);
+        // A null user or empty identities means the address already exists
+        // and nothing was sent.
+        if (!data.user || !data.user.identities || data.user.identities.length === 0) return false;
+        newUserId = data.user.id;
+        return true;
+      }
+    );
+  } catch (error) {
     logSignupError("supabase signUp failed", error);
     throw new PublicError(VERIFICATION_SEND_FAILED_MESSAGE);
   }
 
-  // A null user or empty identities means the address already exists.
-  if (!data.user || !data.user.identities || data.user.identities.length === 0) return;
-  await insertSignupRequestIfMissing(data.user.id, input);
+  if (newUserId) await savePendingSignupProfile(newUserId, input);
 }
 
 /** Creates the tenant and owner membership once the email is verified. Idempotent. */

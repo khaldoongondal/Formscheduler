@@ -121,7 +121,8 @@ export function toGhlRuntimeConfig(connection: GhlConnection) {
     token: decryptSecret(connection.private_token_ciphertext),
     locationId: connection.location_id,
     baseUrl: connection.api_base_url,
-    apiVersion: connection.api_version
+    apiVersion: connection.api_version,
+    useGondalAttributionFields: connection.use_gondal_attribution_fields === true
   };
 }
 
@@ -226,6 +227,7 @@ export async function resolveGhlRuntimeConfig(connection: GhlConnection) {
     token: decryptSecret(current.access_token_ciphertext),
     locationId: current.location_id,
     baseUrl: current.api_base_url,
-    apiVersion: current.api_version
+    apiVersion: current.api_version,
+    useGondalAttributionFields: current.use_gondal_attribution_fields === true
   };
 }

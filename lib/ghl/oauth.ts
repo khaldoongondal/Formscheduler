@@ -54,19 +54,43 @@ function signState(payload: string) {
   return createHmac("sha256", getStateKey()).update(payload).digest("base64url");
 }
 
-export function createOauthState(tenantId: string) {
+/** httpOnly cookie that binds the OAuth state to the browser that started the flow. */
+export const OAUTH_NONCE_COOKIE = "formbook_ghl_oauth_nonce";
+export const OAUTH_NONCE_COOKIE_MAX_AGE_SECONDS = STATE_TTL_MS / 1000;
+
+/** Returns the signed state and its nonce; the caller stores the nonce in OAUTH_NONCE_COOKIE. */
+export function createOauthState(tenantId: string): { state: string; nonce: string } {
+  const nonce = randomBytes(16).toString("base64url");
   const payload = Buffer.from(
     JSON.stringify({
       tenant_id: tenantId,
       expires_at: Date.now() + STATE_TTL_MS,
-      nonce: randomBytes(8).toString("base64url")
+      nonce
     })
   ).toString("base64url");
 
-  return `${payload}.${signState(payload)}`;
+  return { state: `${payload}.${signState(payload)}`, nonce };
 }
 
-export function verifyOauthState(state: string): { tenantId: string } | null {
+/**
+ * True only when the callback comes back to the browser that started the flow
+ * (nonce cookie matches) and the signed-in tenant is the one in the state.
+ * Stops a valid state from one account being used to attach someone else's
+ * GoHighLevel location to it.
+ */
+export function oauthCallbackMatchesSession(
+  verified: { tenantId: string; nonce: string },
+  cookieNonce: string | null | undefined,
+  sessionTenantId: string | null | undefined
+): boolean {
+  if (!cookieNonce || !sessionTenantId) return false;
+  if (sessionTenantId !== verified.tenantId) return false;
+  const expected = Buffer.from(verified.nonce);
+  const actual = Buffer.from(cookieNonce);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+export function verifyOauthState(state: string): { tenantId: string; nonce: string } | null {
   const [payload, signature] = state.split(".");
   if (!payload || !signature) return null;
 
@@ -79,8 +103,9 @@ export function verifyOauthState(state: string): { tenantId: string } | null {
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (typeof parsed.tenant_id !== "string" || typeof parsed.expires_at !== "number") return null;
+    if (typeof parsed.nonce !== "string" || !parsed.nonce) return null;
     if (parsed.expires_at < Date.now()) return null;
-    return { tenantId: parsed.tenant_id };
+    return { tenantId: parsed.tenant_id, nonce: parsed.nonce };
   } catch {
     return null;
   }

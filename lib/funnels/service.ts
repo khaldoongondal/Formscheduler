@@ -2,6 +2,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
 import { assertFormLimit, planLimitMessageForTenant } from "@/lib/billing/plan-service";
 import { parsePlanState, planLimitMessageFromError, shouldShowBadge } from "@/lib/billing/plans";
+import { publishReadinessError } from "@/lib/funnels/publish-readiness";
 import { QUESTION_NOT_FOUND_MESSAGE, questionUpdateFields } from "@/lib/funnels/question-scope";
 import { buildCopySlug, checkSlug } from "@/lib/funnels/slugs";
 import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
@@ -98,6 +99,22 @@ async function assertConnectionBelongsToTenant(connectionId: string | null | und
   if (!connectionId) return;
   const connection = await getGhlConnectionForTenant(connectionId, tenantId);
   if (!connection) throw new Error(FOREIGN_CONNECTION_MESSAGE);
+}
+
+async function assertReadyToPublish(input: {
+  tenantId: string;
+  ghlConnectionId: string | null | undefined;
+  calendarId: string | null | undefined;
+}) {
+  const connection = input.ghlConnectionId
+    ? await getGhlConnectionForTenant(input.ghlConnectionId, input.tenantId)
+    : null;
+  const message = publishReadinessError({
+    ghlConnectionId: connection ? connection.id : null,
+    calendarId: input.calendarId,
+    connectionCalendarId: connection?.calendar_id ?? null
+  });
+  if (message) throw new Error(message);
 }
 
 function assertSlugAllowed(slug: string) {
@@ -402,10 +419,18 @@ export async function updateFunnel(input: unknown) {
   } = parsed;
   let existingTenantId: string | null = null;
   const changesConnection = Boolean(funnel.ghl_connection_id);
-  if (funnel.is_published === true || funnel.slug !== undefined || changesConnection) {
+  const touchesConnectionField = Object.prototype.hasOwnProperty.call(funnel, "ghl_connection_id");
+  const touchesCalendarField = Object.prototype.hasOwnProperty.call(funnel, "calendar_id");
+  if (
+    funnel.is_published === true ||
+    funnel.slug !== undefined ||
+    changesConnection ||
+    touchesConnectionField ||
+    touchesCalendarField
+  ) {
     const { data: existing, error: existingError } = await supabase
       .from("funnels")
-      .select("tenant_id,is_published,slug")
+      .select("tenant_id,is_published,slug,ghl_connection_id,calendar_id")
       .eq("id", id)
       .single();
     if (existingError) throw new Error(existingError.message);
@@ -419,7 +444,18 @@ export async function updateFunnel(input: unknown) {
     if (changesConnection) {
       await assertConnectionBelongsToTenant(funnel.ghl_connection_id, existing.tenant_id);
     }
-    if (funnel.is_published === true && !existing.is_published) {
+    const activating = funnel.is_published === true && !existing.is_published;
+    const staysPublished = (funnel.is_published ?? existing.is_published) === true;
+    // An Active form must be able to take bookings: checked when it is turned
+    // on, and when an Active form's connection or calendar is changed.
+    if (staysPublished && (activating || touchesConnectionField || touchesCalendarField)) {
+      await assertReadyToPublish({
+        tenantId: existing.tenant_id,
+        ghlConnectionId: touchesConnectionField ? funnel.ghl_connection_id || null : existing.ghl_connection_id,
+        calendarId: touchesCalendarField ? funnel.calendar_id || null : existing.calendar_id
+      });
+    }
+    if (activating) {
       await assertFormLimit(existing.tenant_id, "activate", id);
     }
   }

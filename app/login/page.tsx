@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { safeNextPath } from "@/lib/security/safe-redirect";
+import { messageSuggestsPasswordReset } from "@/lib/validation/signup";
 
 export default async function LoginPage({
   searchParams
@@ -44,6 +45,13 @@ export default async function LoginPage({
               <Input id="password" name="password" type="password" required autoComplete="current-password" />
             </div>
             {params.error ? <p className="text-sm text-red-600">{params.error}</p> : null}
+            {messageSuggestsPasswordReset(params.error) ? (
+              <p className="text-sm">
+                <Link className="font-semibold text-slate-900 underline underline-offset-2" href="/auth/reset-password">
+                  Get a new link with Forgot password
+                </Link>
+              </p>
+            ) : null}
             <Button className="w-full" type="submit">
               Sign in
             </Button>

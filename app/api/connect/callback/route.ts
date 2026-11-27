@@ -1,14 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { getAdminTenantContext } from "@/lib/auth/tenant";
 import { upsertOauthGhlConnection } from "@/lib/ghl/connections";
-import { exchangeAuthCode, fetchLocationName, verifyOauthState } from "@/lib/ghl/oauth";
+import {
+  OAUTH_NONCE_COOKIE,
+  exchangeAuthCode,
+  fetchLocationName,
+  oauthCallbackMatchesSession,
+  verifyOauthState
+} from "@/lib/ghl/oauth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const adminUrl = new URL("/admin/ghl-connections", request.nextUrl.origin);
+  const finish = (response: NextResponse) => {
+    // The nonce is single use.
+    response.cookies.set(OAUTH_NONCE_COOKIE, "", { path: "/api/connect", maxAge: 0 });
+    return response;
+  };
   const failed = (message: string) => {
     adminUrl.searchParams.set("error", message);
-    return NextResponse.redirect(adminUrl);
+    return finish(NextResponse.redirect(adminUrl));
   };
 
   const code = request.nextUrl.searchParams.get("code");
@@ -21,6 +33,18 @@ export async function GET(request: NextRequest) {
   const verified = verifyOauthState(state);
   if (!verified) {
     return failed("GHL sign-in session expired. Please try connecting again.");
+  }
+
+  // The flow must finish in the browser that started it, signed in to the
+  // same account, before the code is exchanged.
+  let sessionTenantId: string | null = null;
+  try {
+    ({ tenantId: sessionTenantId } = await getAdminTenantContext(["owner", "admin"]));
+  } catch {
+    sessionTenantId = null;
+  }
+  if (!oauthCallbackMatchesSession(verified, request.cookies.get(OAUTH_NONCE_COOKIE)?.value, sessionTenantId)) {
+    return failed("GHL sign-in could not be matched to your session. Sign in and start the connection again from this page.");
   }
 
   try {
@@ -38,7 +62,7 @@ export async function GET(request: NextRequest) {
 
     adminUrl.searchParams.set("saved", "oauth");
     adminUrl.searchParams.set("connection", connection.id);
-    return NextResponse.redirect(adminUrl);
+    return finish(NextResponse.redirect(adminUrl));
   } catch (error) {
     // Never echo GoHighLevel or Supabase error text into the URL.
     console.error("[connect-callback] GoHighLevel sign-in failed", error);

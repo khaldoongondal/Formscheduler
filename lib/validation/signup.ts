@@ -7,7 +7,15 @@ import { isValidWebsiteValue, normalizeWebsiteValue, websiteValidationMessage } 
 
 export const PHONE_MESSAGE = "Enter your phone number with the country code, like +1 416 555 0100.";
 export const SIGNUP_GENERIC_ERROR = "Something went wrong. Please try again.";
-export const UNVERIFIED_EMAIL_MESSAGE = "Please verify your email first. Check your inbox for the link.";
+export const UNVERIFIED_EMAIL_MESSAGE =
+  "Please verify your email first. Open the link we emailed you, or use Forgot password to get a new link.";
+export const LINK_EXPIRED_MESSAGE =
+  "Your link is invalid or has expired. Use Forgot password to get a new link and set your password.";
+
+/** Messages on /login that should show a direct link to /auth/reset-password. */
+export function messageSuggestsPasswordReset(message: string | null | undefined): boolean {
+  return message === UNVERIFIED_EMAIL_MESSAGE || message === LINK_EXPIRED_MESSAGE;
+}
 export const RESEND_RATE_LIMITED_MESSAGE = "Too many attempts. Please wait an hour and try again.";
 
 /** Strips spaces, dots, dashes and brackets. A leading "00" becomes "+". */
@@ -154,6 +162,24 @@ export function resolveConfirmNext(value: string | null): { pathname: string; se
   const next = params.get("next");
   if (!next || !SET_PASSWORD_NEXT_PATHS.has(next)) return fallback;
   return { pathname: SET_PASSWORD_PATH, search: `?next=${encodeURIComponent(next)}` };
+}
+
+const EMAIL_OTP_TYPES = new Set(["signup", "magiclink", "recovery", "email", "invite", "email_change"]);
+
+/** The one-time link types /auth/confirm and /auth/verify accept. */
+export function isEmailOtpType(value: string | null | undefined): boolean {
+  return typeof value === "string" && EMAIL_OTP_TYPES.has(value);
+}
+
+/**
+ * /auth/confirm never spends a one-time token on a plain GET, because mail
+ * scanners open links before the person does. It forwards to /auth/verify,
+ * which shows a button; the token is used only when that button is pressed.
+ */
+export function buildVerifyInterstitialPath(tokenHash: string, type: string, next: string | null): string {
+  const params = new URLSearchParams({ token_hash: tokenHash, type });
+  if (next) params.set("next", next);
+  return `/auth/verify?${params.toString()}`;
 }
 
 /** Same link shape for password resets, always landing on /auth/set-password. */

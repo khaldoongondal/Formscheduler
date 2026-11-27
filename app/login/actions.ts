@@ -6,7 +6,8 @@ import { checkActionRateLimit } from "@/lib/security/rate-limit";
 import { safeNextPath } from "@/lib/security/safe-redirect";
 import { createAuthServerClient } from "@/lib/supabase/auth";
 
-const SIGN_IN_FAILED_MESSAGE = "Email or password is incorrect, or the email is not verified yet.";
+const SIGN_IN_FAILED_MESSAGE = 
+  "Email or password is incorrect, or the email is not verified yet. Never chose a password? Use Forgot password.";
 const SIGN_IN_RATE_LIMITED_MESSAGE = "Too many sign-in attempts. Please wait a few minutes.";
 
 function loginErrorUrl(message: string, next: string) {

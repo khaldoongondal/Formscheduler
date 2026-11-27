@@ -63,12 +63,32 @@ select id, allowed_mime_types from storage.buckets where id = 'funnel-assets';
 select column_name from information_schema.columns
 where table_schema = 'public' and table_name = 'tenants'
   and column_name in ('contact_name', 'contact_email', 'contact_phone', 'business_name', 'website', 'signup_source');
--- Existing members whose email is not confirmed would be locked out by the new guard.
--- Confirm these users in Supabase Auth, or expect them to use "Forgot password".
-select tm.user_id from public.tenant_members tm
+```
+
+**Hard gate before deploy.** The new code refuses the admin to any user whose email is not confirmed. Existing members were created by the owner and never received a verification email, so confirm them now. List them first:
+
+```sql
+select tm.user_id, u.email, t.signup_source
+from public.tenant_members tm
 join auth.users u on u.id = tm.user_id
+join public.tenants t on t.id = tm.tenant_id
 where u.email_confirmed_at is null;
 ```
+
+If that returns rows, check each address belongs to the expected client, then confirm only members of existing (non self-serve) tenants:
+
+```sql
+update auth.users u
+set email_confirmed_at = now()
+where u.email_confirmed_at is null
+  and u.id in (
+    select tm.user_id from public.tenant_members tm
+    join public.tenants t on t.id = tm.tenant_id
+    where t.signup_source in ('legacy', 'provisioned')
+  );
+```
+
+Re-run the list query and expect no rows before moving on. Anyone missed can still get in with "Forgot password" (the login page now says so).
 
 4. `supabase/migrations/0023_owner_tools.sql`
 
@@ -94,6 +114,17 @@ select tablename, policyname, cmd from pg_policies
 where schemaname = 'public' and cmd <> 'SELECT'
   and tablename in ('tenants', 'tenant_members', 'ghl_connections', 'funnels', 'questions', 'question_options',
     'lead_sessions', 'lead_status_history', 'lead_answers', 'booking_attempts', 'analytics_events');
+-- Expect every column false: the API roles can no longer read any table either
+-- (the app reads with the service role). This covers the GoHighLevel token columns.
+select t as table_name,
+  has_table_privilege('authenticated', 'public.' || t, 'SELECT') as authenticated_select,
+  has_table_privilege('anon', 'public.' || t, 'SELECT') as anon_select
+from unnest(array['tenants', 'tenant_members', 'ghl_connections', 'funnels', 'questions', 'question_options',
+  'lead_sessions', 'lead_status_history', 'lead_answers', 'booking_attempts', 'analytics_events',
+  'plan_limits', 'rate_limit_counters', 'form_reports', 'signup_requests', 'owner_audit_log']) as t;
+-- Expect true for every connection that exists today (the Gondal Tech account),
+-- so its attribution custom fields keep flowing. New connections default to false.
+select id, name, location_id, use_gondal_attribution_fields from public.ghl_connections;
 -- As the authenticated role, a plan change must fail with "permission denied".
 begin;
 set local role authenticated;
@@ -112,7 +143,7 @@ select p.proname,
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
-  and p.proname in ('rate_limit_hit', 'rate_limit_hit_capped', 'get_auth_user_id_by_email', 'is_auth_user_confirmed',
+  and p.proname in ('rate_limit_hit', 'rate_limit_hit_capped', 'rate_limit_release', 'get_auth_user_id_by_email', 'is_auth_user_confirmed',
                     'complete_signup', 'owner_list_clients')
 order by p.proname;
 
@@ -148,7 +179,7 @@ Set every variable in `.env.example`:
 | `GHL_OAUTH_CLIENT_ID`, `GHL_OAUTH_CLIENT_SECRET` | Unchanged |
 | `FORMBOOK_OWNER_EMAILS` | The owner's address |
 | `FORMBOOK_IP_HASH_SALT` | Random, 32+ characters (`openssl rand -base64 32`) |
-| `FORMBOOK_GHL_SIGNUP_WEBHOOK_URL` | Inbound webhook URL from step 6 |
+| `FORMBOOK_GHL_SIGNUP_WEBHOOK_URL` | **Required.** Inbound webhook URL from step 6. Without it, `/signup` refuses new accounts in production (and on preview deployments) and logs an error: the Supabase fallback email only works in the same browser and its resend link does not work with `/auth/confirm`, so it is for local development only. |
 | `FORMBOOK_GHL_PASSWORD_RESET_WEBHOOK_URL` | Inbound webhook URL from step 6 |
 | `FORMBOOK_SETUP_CALL_URL` | The owner's booking link for the free setup call |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | **Required.** From Cloudflare Turnstile (add both hostnames to the widget). Without both, `/signup` refuses new accounts in production and logs an error. Preview deployments need them too (Cloudflare publishes test keys that always pass). |
@@ -192,13 +223,15 @@ Deploy only after steps 3 to 7 are done. Then re-enable the provisioning workflo
 Use a fresh email address:
 
 1. Sign up at `/signup`; the verification email arrives from GoHighLevel.
-2. Open the link; you land on `/auth/set-password`. Choose a password and you reach `/admin/welcome`. This also confirms that `generateLink({ type: "magiclink" })` for an unconfirmed user produced a working verification link and set `email_confirmed_at`.
+2. Open the link; you see the "Confirm my email" page (`/auth/verify`, which does not use the link until the button is pressed, so mail scanners cannot spend it). Press the button; you land on `/auth/set-password`. Choose a password and you reach `/admin/welcome`. This also confirms that `generateLink({ type: "magiclink" })` for an unconfirmed user produced a working verification link and set `email_confirmed_at`.
 3. Create a form and activate it.
 4. From another browser, open the form and use "Report this form".
 5. As the owner, see the report in `/admin/clients`, take the form down, then restore it.
 6. Request a password reset; the email arrives from GoHighLevel and the link works.
 7. Confirm the "Powered by FormBook" badge shows on the free form, and is gone after turning the badge off in `/admin/clients`.
 8. Confirm a signed-in non-owner gets a 404 on `/admin/clients`.
+9. Connect a **second** GoHighLevel location (not the Gondal Tech account) from the new account with the one-click sign-in, link it to a form with a calendar, activate the form and submit a test lead. The lead must reach that location and the booking must work. Its connection has `use_gondal_attribution_fields = false`, so no Gondal Tech custom-field IDs are sent.
+10. Try to activate a form with no GoHighLevel connection; it must refuse with a message about connecting GoHighLevel first.
 
 ### 10. Legal pages
 
@@ -233,7 +266,7 @@ For a project that still had plaintext GoHighLevel tokens:
 
 ## Row level security
 
-The app talks to Postgres only through the service-role client. Tenant tables have RLS on; tables added since Sprint 1 (`plan_limits`, `rate_limit_counters`, `form_reports`, `signup_requests`, `owner_audit_log`) have RLS on and no policies, so the `anon` and `authenticated` roles see nothing. New SQL functions are executable only by `service_role`. Verify with the queries in step 3 and with two test tenants.
+The app talks to Postgres only through the service-role client. Tenant tables have RLS on; tables added since Sprint 1 (`plan_limits`, `rate_limit_counters`, `form_reports`, `signup_requests`, `owner_audit_log`) have RLS on and no policies, so the `anon` and `authenticated` roles see nothing. Since `0024` the API roles also have no table privileges at all (no select, insert, update or delete) on any FormBook table, so a signed-in user cannot read GoHighLevel token columns or owner notes through the REST API. New SQL functions are executable only by `service_role`. Verify with the queries in step 3 and with two test tenants.
 
 ## GoHighLevel setup
 

@@ -396,15 +396,25 @@ export async function moveIntakeFlowItemAction(formData: FormData) {
 export async function duplicateFunnelAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   await assertAdminFunnel(id);
-  const funnel = await duplicateFunnel(id);
+  let copyId: string;
+  try {
+    // Throws readable messages: draft limit reached, suspended account, taken-down form.
+    copyId = (await duplicateFunnel(id)).id;
+  } catch (error) {
+    redirectWithError(`/admin/funnels/${id}`, error);
+  }
   revalidatePath("/admin/funnels");
-  redirect(`/admin/funnels/${funnel.id}?saved=duplicated#settings`);
+  redirect(`/admin/funnels/${copyId}?saved=duplicated#settings`);
 }
 
 export async function deleteFunnelAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   await assertAdminFunnel(id);
-  await deleteFunnel(id);
+  try {
+    await deleteFunnel(id);
+  } catch (error) {
+    redirectWithError(`/admin/funnels/${id}`, error);
+  }
   revalidatePath("/admin/funnels");
   redirect("/admin/funnels?saved=deleted");
 }

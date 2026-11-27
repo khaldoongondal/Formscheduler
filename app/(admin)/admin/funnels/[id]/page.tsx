@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { publishReadinessError } from "@/lib/funnels/publish-readiness";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -151,6 +152,14 @@ export default async function FunnelDetailPage({
   });
   const selectedConnection = connections.find((connection) => connection.id === funnel.ghl_connection_id);
   const actionError = typeof query.error === "string" ? query.error : null;
+  // Active forms that cannot take bookings (for example activated before this check existed).
+  const bookingSetupWarning = funnel.is_published
+    ? publishReadinessError({
+        ghlConnectionId: selectedConnection?.id ?? null,
+        calendarId: funnel.calendar_id,
+        connectionCalendarId: selectedConnection?.calendar_id ?? null
+      })
+    : null;
   const actionSuccess = actionSuccessMessage(query.saved);
   const savedQuestionId = query.saved === "question" || query.saved === "question-order" ? query.question : null;
   const savedOptionId = query.saved === "option" ? query.option : null;
@@ -212,6 +221,11 @@ export default async function FunnelDetailPage({
       </div>
 
       {actionError ? <ActionError message={actionError} /> : null}
+      {bookingSetupWarning ? (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
+          This form is Active but visitors cannot book yet. {bookingSetupWarning}
+        </p>
+      ) : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
 
       <Card id="performance" className="scroll-mt-24 overflow-hidden">

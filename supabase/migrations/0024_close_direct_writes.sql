@@ -4,12 +4,15 @@
 --    the app goes through the service role, but 0005 let any tenant owner or
 --    admin update tenants, funnels and other tenant tables with their own
 --    login. With public signup that would let anyone change their own plan,
---    badge, suspension, form takedown or slug. Reads (select policies) stay.
+--    badge, suspension, form takedown or slug. Reads are closed in section 4.
 -- 2. A guard trigger on tenants and funnels that refuses changes to the
 --    platform-controlled columns from the anon and authenticated roles, even
 --    if a write grant comes back by mistake later.
 -- 3. rate_limit_hit_capped(): a counter that only counts allowed hits, so
---    refused requests do not use up a shared daily cap.
+--    refused requests do not use up a shared daily cap. rate_limit_release()
+--    gives a hit back after a failed email send.
+-- 4. Revoke table select from the API roles (the app reads with the service role).
+-- 5. ghl_connections.use_gondal_attribution_fields, true for existing rows only.
 
 -- 1. Drop the write policies from 0005. Select policies are kept.
 drop policy if exists tenants_update_owner_admin on public.tenants;
@@ -134,5 +137,61 @@ end;
 $$;
 revoke all on function public.rate_limit_hit_capped(text, integer, integer) from public, anon, authenticated;
 grant execute on function public.rate_limit_hit_capped(text, integer, integer) to service_role;
+
+-- Gives back one hit, used when an email send fails after taking a cooldown
+-- slot, so a failed send does not block the retry.
+create or replace function public.rate_limit_release(p_bucket_key text)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.rate_limit_counters
+  set hits = hits - 1
+  where bucket_key = p_bucket_key and hits > 0;
+$$;
+revoke all on function public.rate_limit_release(text) from public, anon, authenticated;
+grant execute on function public.rate_limit_release(text) to service_role;
+
+-- 4. Close the read path too. The app reads every table with the service role;
+-- the user-scoped client is only used for Supabase Auth calls. The select
+-- policies from 0005 let any signed-in member read, through the REST API,
+-- the GoHighLevel token ciphertext columns and the owner-only suspension and
+-- takedown notes. With public signup anyone can get such a session, so the
+-- API roles lose every table privilege here. If a user-scoped read is ever
+-- needed, grant column-level select that leaves out the *_ciphertext columns
+-- and the owner-only tenant and funnel fields.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'tenants', 'tenant_members', 'ghl_connections', 'funnels', 'questions', 'question_options',
+    'lead_sessions', 'lead_status_history', 'lead_answers', 'booking_attempts', 'analytics_events',
+    'plan_limits', 'rate_limit_counters', 'form_reports', 'signup_requests', 'owner_audit_log'
+  ]
+  loop
+    if to_regclass('public.' || t) is not null then
+      execute format('revoke select on table public.%I from anon, authenticated', t);
+    end if;
+  end loop;
+end $$;
+
+-- 5. GoHighLevel attribution custom fields. The field IDs in lib/ghl/attribution.ts
+-- exist only in the Gondal Tech GoHighLevel account. They are sent only for
+-- connections flagged here, so other accounts never receive foreign field IDs.
+-- Every connection that exists before self-serve signup is the Gondal Tech one,
+-- so existing rows are flagged once; new connections default to false.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'ghl_connections' and column_name = 'use_gondal_attribution_fields'
+  ) then
+    alter table public.ghl_connections
+      add column use_gondal_attribution_fields boolean not null default false;
+    update public.ghl_connections set use_gondal_attribution_fields = true;
+  end if;
+end $$;
 
 notify pgrst, 'reload schema';

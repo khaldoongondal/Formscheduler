@@ -9,24 +9,10 @@ import {
   updateOpportunity,
   type GhlRuntimeConfig
 } from "@/lib/ghl/client";
+import { buildGhlTrackingCustomFields } from "@/lib/ghl/attribution";
 import type { Funnel, Json, LeadAnswer, LeadSession, Question } from "@/lib/types/database";
 
 const MAX_GHL_NOTE_BODY_LENGTH = 5000;
-const GHL_ATTRIBUTION_FIELD_IDS = {
-  device_fingerprint: "mD0nl9Bol76ktldcLQh9",
-  fbclid: "NYqxiIU8Cw5MuKvZuxqU",
-  fbc: "uxxBgB61uS01OOPXS6c6",
-  fbp: "zelneybTWDq3nVVvi27t",
-  utm_source: "LwNlb6SU9bcF5oM3umBC",
-  utm_medium: "Wx41yHI1dyO4r2YN9R9B",
-  utm_campaign: "N5EydZ1pHC6Mnsq7LIic",
-  utm_content: "f5eU5TgjtvGyRgvQ7ygP",
-  utm_term: "O6LkXOXEBmTvMAyQCfh3",
-  utm_adset: "48D31CoLhFH8u6iSCnqL",
-  utm_adid: "TCeKglZheFpbe06LTD95",
-  utm_adsetid: "xT7tCx1XJkgGTIGXhmXI",
-  utm_campaignid: "FD0XrXhntAvPrFPZPEq6"
-} as const;
 
 function getSlotStartsFromGhlResponse(result: Record<string, unknown>) {
   return Object.values(result).flatMap((value) => {
@@ -153,51 +139,15 @@ function buildGhlAnswerCustomFields(answers: Array<LeadAnswer & { question?: Que
     .filter((field): field is NonNullable<typeof field> => field !== null);
 }
 
-function isJsonRecord(value: Json): value is { [key: string]: Json | undefined } {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function getMetadataString(metadata: Json, key: string) {
-  if (!isJsonRecord(metadata)) return undefined;
-
-  const value = metadata[key];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function buildGhlTrackingCustomFields(leadSession: LeadSession) {
-  return [
-    [GHL_ATTRIBUTION_FIELD_IDS.fbclid, getMetadataString(leadSession.metadata, "fbclid")],
-    [
-      GHL_ATTRIBUTION_FIELD_IDS.device_fingerprint,
-      getMetadataString(leadSession.metadata, "device_fingerprint") ?? getMetadataString(leadSession.metadata, "fingerprint")
-    ],
-    [GHL_ATTRIBUTION_FIELD_IDS.fbc, getMetadataString(leadSession.metadata, "fbc")],
-    [GHL_ATTRIBUTION_FIELD_IDS.fbp, getMetadataString(leadSession.metadata, "fbp")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_source, leadSession.utm_source?.trim() ?? getMetadataString(leadSession.metadata, "utm_source")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_medium, leadSession.utm_medium?.trim() ?? getMetadataString(leadSession.metadata, "utm_medium")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_campaign, leadSession.utm_campaign?.trim() ?? getMetadataString(leadSession.metadata, "utm_campaign")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_content, leadSession.utm_content?.trim() ?? getMetadataString(leadSession.metadata, "utm_content")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_term, leadSession.utm_term?.trim() ?? getMetadataString(leadSession.metadata, "utm_term")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_adset, getMetadataString(leadSession.metadata, "utm_adset")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_adid, getMetadataString(leadSession.metadata, "utm_adid")],
-    [GHL_ATTRIBUTION_FIELD_IDS.utm_adsetid, getMetadataString(leadSession.metadata, "utm_adsetid")],
-    [
-      GHL_ATTRIBUTION_FIELD_IDS.utm_campaignid,
-      getMetadataString(leadSession.metadata, "utm_campaignid") ?? getMetadataString(leadSession.metadata, "utm_id")
-    ]
-  ]
-    .filter((field): field is [string, string] => Boolean(field[1]))
-    .map(([id, fieldValue]) => ({
-      id,
-      fieldValue
-    }));
-}
-
 function buildGhlLeadContactCustomFields(
+  config: GhlRuntimeConfig,
   leadSession: LeadSession,
   answers: Array<LeadAnswer & { question?: Question }>
 ) {
-  return [...buildGhlTrackingCustomFields(leadSession), ...buildGhlAnswerCustomFields(answers)];
+  return [
+    ...buildGhlTrackingCustomFields(leadSession, config.useGondalAttributionFields === true),
+    ...buildGhlAnswerCustomFields(answers)
+  ];
 }
 
 function truncateNoteBody(body: string) {
@@ -219,7 +169,7 @@ export async function upsertLeadContact(
     name: leadSession.full_name ?? undefined,
     email: leadSession.email ?? undefined,
     phone: leadSession.phone ?? undefined,
-    customFields: buildGhlLeadContactCustomFields(leadSession, answers)
+    customFields: buildGhlLeadContactCustomFields(config, leadSession, answers)
   });
 }
 
@@ -235,7 +185,7 @@ export async function updateLeadContactAnswers(
     name: leadSession.full_name ?? undefined,
     email: leadSession.email ?? undefined,
     phone: leadSession.phone ?? undefined,
-    customFields: buildGhlLeadContactCustomFields(leadSession, answers)
+    customFields: buildGhlLeadContactCustomFields(config, leadSession, answers)
   });
 }
 

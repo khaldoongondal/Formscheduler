@@ -3,6 +3,8 @@ export interface GhlRuntimeConfig {
   locationId: string;
   baseUrl: string;
   apiVersion: string;
+  /** Send the Gondal Tech attribution custom fields (lib/ghl/attribution). */
+  useGondalAttributionFields?: boolean;
 }
 
 export interface GhlContactInput {

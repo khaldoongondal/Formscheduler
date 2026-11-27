@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getAdminTenantContext } from "@/lib/auth/tenant";
-import { buildAuthorizeUrl, createOauthState, isGhlOauthConfigured } from "@/lib/ghl/oauth";
+import {
+  OAUTH_NONCE_COOKIE,
+  OAUTH_NONCE_COOKIE_MAX_AGE_SECONDS,
+  buildAuthorizeUrl,
+  createOauthState,
+  isGhlOauthConfigured
+} from "@/lib/ghl/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -24,5 +30,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.redirect(buildAuthorizeUrl(createOauthState(tenantId)));
+  const { state, nonce } = createOauthState(tenantId);
+  const response = NextResponse.redirect(buildAuthorizeUrl(state));
+  // Binds the state to this browser; the callback requires the same nonce.
+  // SameSite=Lax is sent on the top-level redirect back from GoHighLevel.
+  response.cookies.set(OAUTH_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/api/connect",
+    maxAge: OAUTH_NONCE_COOKIE_MAX_AGE_SECONDS
+  });
+  return response;
 }

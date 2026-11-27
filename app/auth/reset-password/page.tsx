@@ -32,6 +32,10 @@ export default async function ResetPasswordPage({
                 If an account exists for that email, a password reset link is on its way. Check your
                 inbox (and spam folder).
               </p>
+              <p className="text-sm text-slate-500">
+                We send at most one link every three minutes to the same address. If you just asked for one, wait a
+                few minutes before trying again.
+              </p>
               <Link className="text-sm font-semibold text-slate-900 underline underline-offset-2" href="/login">
                 Back to sign in
               </Link>

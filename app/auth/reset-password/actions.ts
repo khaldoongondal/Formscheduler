@@ -3,7 +3,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { findUserIdByEmail } from "@/lib/auth/users";
-import { allowEmailSend, checkActionRateLimit } from "@/lib/security/rate-limit";
+import { sendWithEmailCooldown } from "@/lib/security/email-cooldown";
+import { checkActionRateLimit, reserveEmailSend } from "@/lib/security/rate-limit";
 import { postGhlWebhook } from "@/lib/signup/ghl-webhook";
 import { createAuthServerClient } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -42,10 +43,13 @@ async function findDisplayName(userId: string): Promise<string> {
   return typeof fullName === "string" ? fullName.slice(0, 120) : "";
 }
 
-/** GoHighLevel path: generate the recovery link server-side and hand it to the workflow. */
-async function sendResetThroughGhl(webhookUrl: string, email: string) {
+/**
+ * GoHighLevel path: generate the recovery link server-side and hand it to the
+ * workflow. Returns false when there is no account (nothing sent).
+ */
+async function sendResetThroughGhl(webhookUrl: string, email: string): Promise<boolean> {
   const userId = await findUserIdByEmail(email);
-  if (!userId) return;
+  if (!userId) return false;
 
   const appUrl = getAppUrl();
   const supabase = createServiceClient();
@@ -63,6 +67,7 @@ async function sendResetThroughGhl(webhookUrl: string, email: string) {
     name: await findDisplayName(userId),
     reset_link: buildResetLink(appUrl, hashedToken)
   });
+  return true;
 }
 
 export async function requestPasswordReset(formData: FormData) {
@@ -78,22 +83,25 @@ export async function requestPasswordReset(formData: FormData) {
   }
 
   // Per address as well: a short send cooldown, so one inbox cannot be flooded
-  // from many IPs, but nobody can block a real reset for more than a few minutes.
-  if (await allowEmailSend("password-reset-email", email)) {
-    const webhookUrl = process.env.FORMBOOK_GHL_PASSWORD_RESET_WEBHOOK_URL?.trim();
-    try {
-      if (webhookUrl) {
-        await sendResetThroughGhl(webhookUrl, email);
-      } else {
+  // from many IPs, but nobody can block a real reset for more than a few
+  // minutes. A failed send gives the slot back, so the retry goes out.
+  const webhookUrl = process.env.FORMBOOK_GHL_PASSWORD_RESET_WEBHOOK_URL?.trim();
+  try {
+    await sendWithEmailCooldown(
+      () => reserveEmailSend("password-reset-email", email),
+      async () => {
+        if (webhookUrl) return sendResetThroughGhl(webhookUrl, email);
         const supabase = await createAuthServerClient();
-        await supabase.auth.resetPasswordForEmail(email, {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${getAppUrl()}/auth/confirm?next=/auth/set-password`
         });
+        if (error) throw new Error(`resetPasswordForEmail failed: ${error.message}`);
+        return true;
       }
-    } catch (error) {
-      // Logged and swallowed: the visitor always sees the same confirmation.
-      console.error("[reset-password] send failed:", error instanceof Error ? error.message : "unknown error");
-    }
+    );
+  } catch (error) {
+    // Logged and swallowed: the visitor always sees the same confirmation.
+    console.error("[reset-password] send failed:", error instanceof Error ? error.message : "unknown error");
   }
 
   // Always confirm, regardless of whether the account exists, to avoid

@@ -42,7 +42,8 @@ export default async function CheckEmailPage({
 
           {params.sent ? (
             <p className="text-sm text-slate-700" role="status">
-              If an account is waiting for verification, we sent a new link.
+              If an account is waiting for verification, we sent a new link. We send at most one link every three
+              minutes, so if you just asked for one, wait a few minutes before trying again.
             </p>
           ) : null}
           {error ? (
@@ -59,6 +60,14 @@ export default async function CheckEmailPage({
               </Button>
             </form>
           ) : null}
+
+          <p className="text-sm text-slate-700">
+            Already verified your email, or this address already has an account? Sign in, or use{" "}
+            <Link className="font-semibold underline underline-offset-2" href="/auth/reset-password">
+              Forgot password
+            </Link>{" "}
+            to get a new link and set a new password.
+          </p>
 
           <p className="text-center text-sm text-slate-500">
             <Link className="underline underline-offset-2" href="/login">

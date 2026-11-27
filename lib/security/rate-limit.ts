@@ -11,6 +11,7 @@ import {
   windowResetSeconds,
   windowStartSeconds
 } from "@/lib/security/rate-limit-core";
+import type { EmailSendReservation } from "@/lib/security/email-cooldown";
 import { createServiceClient } from "@/lib/supabase/server";
 
 /**
@@ -123,17 +124,31 @@ export async function hitCappedLimit(opts: {
 
 /**
  * Per-address cooldown for outgoing emails (verification, password reset).
- * Returns true when an email may be sent to this address now.
+ * Takes a slot when one is free. Call release() when the send fails or turns
+ * out to be unnecessary, so only a real send starts the cooldown. Use it
+ * through sendWithEmailCooldown (lib/security/email-cooldown).
  */
-export async function allowEmailSend(scope: EmailSendScope, email: string): Promise<boolean> {
+export async function reserveEmailSend(scope: EmailSendScope, email: string): Promise<EmailSendReservation> {
   const { limit, windowSeconds } = EMAIL_SEND_COOLDOWNS[scope];
-  const result = await hitCappedLimit({
-    scope,
-    subject: hashSubject(email.trim().toLowerCase(), getIpHashSalt()),
-    limit,
-    windowSeconds
-  });
-  return result.allowed;
+  const nowMs = Date.now();
+  const subject = hashSubject(email.trim().toLowerCase(), getIpHashSalt());
+  // The same key is used for the release, even if the window rolls over meanwhile.
+  const bucketKey = buildBucketKey(scope, subject, windowStartSeconds(nowMs, windowSeconds));
+  const result = await hitCappedLimit({ scope, subject, limit, windowSeconds, nowMs });
+
+  return {
+    allowed: result.allowed,
+    release: async () => {
+      if (!result.allowed) return;
+      try {
+        const supabase = createServiceClient();
+        const { error } = await supabase.rpc("rate_limit_release", { p_bucket_key: bucketKey });
+        if (error) console.error("rate_limit_release failed", scope);
+      } catch {
+        console.error("rate_limit_release failed", scope);
+      }
+    }
+  };
 }
 
 const DAILY_CAP_CONFIG = {
