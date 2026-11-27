@@ -355,8 +355,8 @@ export default async function FunnelDetailPage({
     .filter((question): question is (typeof funnel.questions)[number] => Boolean(question));
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <div className="workspace-builder space-y-8">
+      <header className="workspace-heading">
         <div>
           <Button asChild variant="ghost" size="sm" className="-ml-3 mb-3">
             <Link href="/admin/funnels">
@@ -397,7 +397,7 @@ export default async function FunnelDetailPage({
             </Button>
           </form>
         </div>
-      </div>
+      </header>
 
       {funnel.demo_seed_batch ? <SampleDataBanner /> : null}
       {isFrozen ? (
@@ -426,7 +426,23 @@ export default async function FunnelDetailPage({
       ) : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
 
-      <FormPreviewPanel funnelId={funnel.id} version={funnel.updated_at} forceOpen={query.preview === "1"}>
+      <FormPreviewPanel
+        funnelId={funnel.id}
+        version={funnel.updated_at}
+        forceOpen={query.preview === "1"}
+        navigation={
+          <nav className="workspace-editor-index" aria-label="Funnel sections">
+            <SettingsJump href="#performance" label="Performance" description="Traffic, bookings, and conversion rates." />
+            <SettingsJump href="#handoff" label="Current handoff" description="Calendar, CRM, and pipeline routing." />
+            <SettingsJump href="#settings" label="Funnel settings" description="Public copy, booking, calendar and CRM, routing, and theme." />
+            <SettingsJump href="#questions" label="Question flow" description="Contact fields, qualification questions, and answers." />
+            <SettingsJump href="#logo" label="Logo" description="Optional first-screen logo file." />
+            <SettingsJump href="#embed-links" label="Embed and links" description="Full-page, iframe, and popup snippets." />
+            <SettingsJump href="#meta" label="Server-side Meta events" description="Choose a pixel and configure Meta consent for this form." />
+            <SettingsJump href="#browser-tracking" label="Browser tracking" description="Connect Meta Pixel, Tag Manager, Google Analytics or Clarity." />
+          </nav>
+        }
+      >
       <Card id="performance" className="scroll-mt-24 overflow-hidden">
         <CardHeader className="border-b border-slate-100 p-5">
           <div className="min-w-0">
@@ -510,7 +526,7 @@ export default async function FunnelDetailPage({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="handoff" className="scroll-mt-24">
         <CardHeader>
           <SectionTitle icon={<CalendarClock className="h-5 w-5" />} title="Current handoff" />
           <CardDescription>This is what the form is using right now for its calendar, its CRM, and pipeline routing.</CardDescription>
@@ -531,15 +547,6 @@ export default async function FunnelDetailPage({
           ) : null}
         </CardContent>
       </Card>
-
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SettingsJump href="#settings" label="Funnel settings" description="Public copy, booking, calendar and CRM, routing, and theme." />
-        <SettingsJump href="#questions" label="Question flow" description="Contact fields, qualification questions, and answers." />
-        <SettingsJump href="#logo" label="Logo" description="Drop in an optional first-screen logo file." />
-        <SettingsJump href="#embed-links" label="Embed and links" description="Full-page, iframe, and popup snippets." />
-        <SettingsJump href="#meta" label="Server-side Meta events" description="Choose a pixel and configure Meta consent for this form." />
-        <SettingsJump href="#browser-tracking" label="Browser tracking" description="Connect Meta Pixel, Tag Manager, Google Analytics or Clarity." />
-      </section>
 
       <section className="space-y-6">
           <Card id="settings" className="overflow-hidden">
@@ -1356,8 +1363,8 @@ function SavedBadge({ compact = false, label }: { compact?: boolean; label: stri
 
 function SectionTitle({ icon, title }: { icon: ReactNode; title: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-slate-500">{icon}</span>
+    <div className="workspace-section-title">
+      <span aria-hidden="true">{icon}</span>
       <CardTitle>{title}</CardTitle>
     </div>
   );
@@ -1499,12 +1506,9 @@ function SettingsJump({
   label: string;
 }) {
   return (
-    <a
-      href={href}
-      className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-    >
-      <span className="block text-sm font-semibold text-slate-950">{label}</span>
-      <span className="mt-1 block text-sm leading-5 text-slate-500">{description}</span>
+    <a href={href} title={description}>
+      <span>{label}</span>
+      <ArrowDown size={13} aria-hidden="true" />
     </a>
   );
 }
@@ -1780,9 +1784,9 @@ function Metric({
   value: number | string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="text-3xl font-semibold text-slate-950">{value}</div>
-      <div className="mt-2 text-sm font-semibold text-slate-800">{label}</div>
+    <div className="workspace-metric">
+      <div className="workspace-metric-value">{value}</div>
+      <div className="mt-2 text-sm font-semibold">{label}</div>
       <div className="mt-1 text-xs leading-5 text-slate-500">{helper}</div>
     </div>
   );
@@ -2040,7 +2044,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 
 function Snippet({ label, value, onCopied }: { label: string; value: string; onCopied?: () => Promise<void> }) {
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-slate-800">{label}</p>
         <CopySnippetButton label={label} value={value} onCopied={onCopied} />

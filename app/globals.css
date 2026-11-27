@@ -2,8 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/brand/fonts/dm-sans-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/brand/fonts/instrument-serif-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/brand/fonts/instrument-serif-italic-latin.woff2") format("woff2");
+}
+
 @layer base {
   :root {
+    --jardin-paper: #f5f5ed;
+    --jardin-forest: #193c35;
+    --jardin-iris: #806399;
+    --jardin-sage: #acbd93;
+    --jardin-lilac: #d9cfe8;
+    --jardin-clay: #c77962;
+    --font-display: "Instrument Serif", Georgia, serif;
+    --font-sans: "DM Sans", system-ui, sans-serif;
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -26,6 +58,39 @@
 
   * {
     @apply border-border;
+  }
+
+  /* Keep owner-selected themes and the white-label public booking flow independent. */
+  .jardin-ui {
+    --background: 60 29% 95%;
+    --foreground: 168 41% 17%;
+    --primary: 168 41% 17%;
+    --primary-foreground: 60 29% 97%;
+    --card: 48 45% 98%;
+    --card-foreground: 168 41% 17%;
+    --secondary: 86 24% 88%;
+    --secondary-foreground: 168 41% 17%;
+    --muted: 58 22% 91%;
+    --muted-foreground: 163 10% 35%;
+    --accent: 272 21% 44%;
+    --accent-foreground: 0 0% 100%;
+    --border: 66 13% 82%;
+    --input: 77 10% 62%;
+    --ring: 272 26% 42%;
+    --radius: 0.65rem;
+    color: var(--jardin-forest);
+    background-color: var(--jardin-paper);
+    font-family: var(--font-sans);
+  }
+
+  .jardin-ui :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 3px;
+  }
+
+  .jardin-ui ::selection {
+    color: var(--jardin-forest);
+    background-color: var(--jardin-lilac);
   }
 
   body {

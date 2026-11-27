@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Script from "next/script";
-import { useActionState, useEffect, type InputHTMLAttributes } from "react";
+import { useActionState, useEffect, useRef, useState, type InputHTMLAttributes } from "react";
 import { signUpAction, type SignupState } from "@/app/signup/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,18 @@ import type { SignupField } from "@/lib/validation/signup";
 
 declare global {
   interface Window {
-    turnstile?: { reset: (widget?: string | HTMLElement) => void };
+    turnstile?: {
+      render: (container: HTMLElement, options: {
+        sitekey: string;
+        action: "signup";
+        size: "flexible";
+        callback: () => void;
+        "expired-callback": () => void;
+        "error-callback": () => void;
+      }) => string;
+      reset: (id: string) => void;
+      remove: (id: string) => void;
+    };
   }
 }
 
@@ -30,15 +41,39 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 }
 
 export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
-  const [state, formAction, pending] = useActionState(signUpAction, initialState);
+  const container = useRef<HTMLDivElement>(null);
+  const widgetId = useRef<string | null>(null);
+  const [sdkReady, setSdkReady] = useState(false);
+  const [challenge, setChallenge] = useState<"waiting" | "passed" | "error">("waiting");
+  const [state, formAction, pending] = useActionState(async (previous: SignupState, data: FormData) => {
+    try {
+      return await signUpAction(previous, data);
+    } finally {
+      if (widgetId.current !== null) {
+        setChallenge("waiting");
+        window.turnstile?.reset(widgetId.current);
+      }
+    }
+  }, initialState);
   const errors = state.fieldErrors;
 
-  // A Turnstile token works once, so get a fresh one after a failed submit.
   useEffect(() => {
-    if (turnstileSiteKey && state !== initialState) {
-      window.turnstile?.reset();
-    }
-  }, [state, turnstileSiteKey]);
+    const api = window.turnstile;
+    if (!sdkReady || !api || !turnstileSiteKey || !container.current) return;
+    const id = api.render(container.current, {
+      sitekey: turnstileSiteKey,
+      action: "signup",
+      size: "flexible",
+      callback: () => setChallenge("passed"),
+      "expired-callback": () => setChallenge("waiting"),
+      "error-callback": () => setChallenge("error")
+    });
+    widgetId.current = id;
+    return () => {
+      widgetId.current = null;
+      api.remove(id);
+    };
+  }, [sdkReady, turnstileSiteKey]);
 
   const textField = (
     field: Exclude<SignupField, "terms">,
@@ -90,6 +125,7 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) 
             className="mt-0.5 h-4 w-4"
             defaultChecked={state.values.terms}
             aria-invalid={errors.terms ? true : undefined}
+            aria-describedby={errors.terms ? "terms-error" : undefined}
           />
           <span>
             I agree to the{" "}
@@ -112,8 +148,20 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) 
 
       {turnstileSiteKey ? (
         <>
-          <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />
-          <div className="cf-turnstile" data-sitekey={turnstileSiteKey} />
+          <Script
+            src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+            strategy="afterInteractive"
+            onReady={() => setSdkReady(true)}
+            onError={() => setChallenge("error")}
+          />
+          <div ref={container} />
+          {challenge !== "passed" && (
+            <p className="text-xs text-slate-600" role="status">
+              {challenge === "error"
+                ? "The security check could not load. Refresh this page to try again."
+                : "Waiting for the security check."}
+            </p>
+          )}
         </>
       ) : null}
 
@@ -123,7 +171,7 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) 
         </p>
       ) : null}
 
-      <Button className="w-full" type="submit" disabled={pending}>
+      <Button className="w-full" type="submit" disabled={pending || Boolean(turnstileSiteKey && challenge !== "passed")}>
         {pending ? "Creating account..." : "Create account"}
       </Button>
 

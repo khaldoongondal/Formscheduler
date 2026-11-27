@@ -38,7 +38,7 @@ function form(id: string, overrides: Partial<FormActivity> = {}): FormActivity {
 describe("customer form pages do not inherit FormBook share metadata", () => {
   it("the root layout keeps only neutral defaults", () => {
     const layout = source("app", "layout.tsx");
-    assert.doesNotMatch(layout, /openGraph|twitter|SITE_DESCRIPTION|SITE_TITLE|applicationName|HOME_METADATA/);
+    assert.doesNotMatch(layout, /openGraph|twitter|SITE_DESCRIPTION|SITE_TITLE|applicationName|HOME_METADATA|PRODUCT_ICONS|\bicons:/);
     assert.ok(!existsSync(path.join(ROOT, "app", "opengraph-image.tsx")), "root opengraph-image applies to every route");
     assert.ok(!existsSync(path.join(ROOT, "app", "twitter-image.tsx")), "root twitter-image applies to every route");
     assert.ok(!existsSync(path.join(ROOT, "app", "page.tsx")), "the home page lives in the (home) route group");
@@ -49,6 +49,7 @@ describe("customer form pages do not inherit FormBook share metadata", () => {
     assert.ok(existsSync(path.join(ROOT, "app", "(home)", "twitter-image.tsx")));
     assert.match(source("app", "(home)", "page.tsx"), /export const metadata: Metadata = HOME_METADATA;/);
     assert.equal(HOME_METADATA.openGraph?.url, "/");
+    assert.deepEqual(HOME_METADATA.icons, { icon: "/brand/formbook-mark.png" });
     assert.deepEqual(HOME_METADATA.title, { absolute: SITE_TITLE });
   });
 
@@ -111,6 +112,7 @@ describe("customer form pages do not inherit FormBook share metadata", () => {
     const dir = ["app", ...segment, "[slug]"];
     it(`${dir.join("/")} sets its own metadata and shows the not-available view on 404`, () => {
       const page = source(...dir, "page.tsx");
+      assert.doesNotMatch(page, /PRODUCT_ICONS|formbook-mark\.png/);
       assert.match(page, /formPageMetadata|splitLinkMetadata/);
       assert.match(page, /notFound\(\)/);
       assert.match(source(...dir, "not-found.tsx"), /FormNotAvailable as default/);

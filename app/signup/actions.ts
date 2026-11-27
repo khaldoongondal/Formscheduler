@@ -58,7 +58,7 @@ export async function signUpAction(_prev: SignupState, formData: FormData): Prom
 
   const captcha = turnstileMode();
   if (captcha === "missing") {
-    console.error("[signup] refused: Turnstile keys are not set in production");
+    console.error("[signup] refused: incomplete Turnstile configuration");
     return { values, fieldErrors: { form: SIGNUP_UNAVAILABLE_MESSAGE } };
   }
   if (captcha === "enforced") {

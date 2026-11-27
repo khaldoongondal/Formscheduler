@@ -25,6 +25,7 @@ export default async function SplitTestEmbedPage({
   if (missingEnv.length > 0) {
     return (
       <SetupRequired
+        as="main"
         title="Supabase is required to preview embedded split test links."
         description="Split test links choose a form and load it from Supabase. Add the database environment variables before opening a split test link."
         missingEnv={missingEnv}

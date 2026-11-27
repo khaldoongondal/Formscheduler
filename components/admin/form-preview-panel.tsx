@@ -53,6 +53,7 @@ export function FormPreviewPanel({
   funnelId,
   version,
   forceOpen = false,
+  navigation,
   children
 }: {
   funnelId: string;
@@ -60,6 +61,7 @@ export function FormPreviewPanel({
   version: string;
   /** True when the page URL has ?preview=1 (the checklist link). */
   forceOpen?: boolean;
+  navigation: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(forceOpen);
@@ -123,7 +125,7 @@ export function FormPreviewPanel({
   // forms (typed but unsaved values stay).
   return (
     <div className="space-y-8">
-      <div className="flex justify-end">{toggleButton}</div>
+      <div className="workspace-builder-toolbar">{navigation}{toggleButton}</div>
       <div className={open ? "grid gap-8 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start" : ""}>
         {open ? (
         <aside

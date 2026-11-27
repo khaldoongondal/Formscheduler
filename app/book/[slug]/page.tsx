@@ -26,6 +26,7 @@ export default async function BookPage({ params }: { params: Promise<{ slug: str
   if (missingEnv.length > 0) {
     return (
       <SetupRequired
+        as="main"
         title="Supabase is required to preview booking funnels."
         description="Public booking routes render funnel configuration and questions from Supabase. Add the database environment variables before opening a funnel preview."
         missingEnv={missingEnv}

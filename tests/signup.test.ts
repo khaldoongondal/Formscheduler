@@ -17,7 +17,7 @@ import {
   resolveConfirmNext,
   resolveSetPasswordNext
 } from "@/lib/validation/signup";
-import { turnstileMode } from "@/lib/signup/turnstile";
+import { turnstileMode, verifyTurnstile } from "@/lib/signup/turnstile";
 
 const EM_DASH = String.fromCharCode(0x2014);
 
@@ -242,20 +242,116 @@ describe("signup copy", () => {
   });
 });
 
+const productionHosts = ["app.formbook.ca", "formbooking.gondaltech.app"];
+const turnstileEnv = {
+  NODE_ENV: "production",
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: "fixture-site-key",
+  TURNSTILE_SECRET_KEY: "fixture-secret",
+  TURNSTILE_HOSTNAMES: productionHosts.join(",")
+};
+
 describe("turnstileMode", () => {
-  it("is enforced whenever both keys are set", () => {
-    assert.equal(turnstileMode({ NODE_ENV: "production", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s", TURNSTILE_SECRET_KEY: "k" }), "enforced");
-    assert.equal(turnstileMode({ NODE_ENV: "development", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s", TURNSTILE_SECRET_KEY: "k" }), "enforced");
+  it("requires both keys and a nonempty list of exact hostnames", () => {
+    assert.equal(turnstileMode(turnstileEnv), "enforced");
+    for (const hosts of [undefined, " , ", "*.example.com", "https://example.com"]) {
+      assert.equal(turnstileMode({ ...turnstileEnv, TURNSTILE_HOSTNAMES: hosts }), "missing");
+    }
   });
 
   it("refuses signup in production when a key is missing or blank", () => {
-    assert.equal(turnstileMode({ NODE_ENV: "production" }), "missing");
-    assert.equal(turnstileMode({ NODE_ENV: "production", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s" }), "missing");
-    assert.equal(turnstileMode({ NODE_ENV: "production", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s", TURNSTILE_SECRET_KEY: "  " }), "missing");
+    assert.equal(turnstileMode({ ...turnstileEnv, NEXT_PUBLIC_TURNSTILE_SITE_KEY: undefined }), "missing");
+    assert.equal(turnstileMode({ ...turnstileEnv, TURNSTILE_SECRET_KEY: "  " }), "missing");
+  });
+
+  it("allows a keyed development widget for localhost only with its host configured", () => {
+    const local = { ...turnstileEnv, NODE_ENV: "development" };
+    assert.equal(turnstileMode({ ...local, TURNSTILE_HOSTNAMES: "localhost,127.0.0.1" }), "enforced");
+    assert.equal(turnstileMode({ ...local, TURNSTILE_HOSTNAMES: undefined }), "missing");
   });
 
   it("is off outside production when keys are missing", () => {
     assert.equal(turnstileMode({ NODE_ENV: "development" }), "off");
     assert.equal(turnstileMode({ NODE_ENV: "test" }), "off");
+  });
+});
+
+describe("verifyTurnstile", () => {
+  const token = "fixture-signup-response";
+  const ip = "192.0.2.10";
+  const approved = { success: true, action: "signup", hostname: productionHosts[0] };
+
+  it("posts the token to Siteverify and accepts signup on either configured host", async (t) => {
+    const requests: Request[] = [];
+    let hostname = "";
+    const fakeFetch: typeof fetch = async (url, init) => {
+      requests.push(new Request(url, init));
+      return Response.json({ ...approved, hostname });
+    };
+    t.mock.method(globalThis, "fetch", fakeFetch);
+    for (const host of productionHosts) {
+      hostname = host;
+      assert.equal(await verifyTurnstile(token, ip, turnstileEnv), true, host);
+    }
+    assert.equal(requests.length, 2);
+    for (const request of requests) {
+      assert.equal(request.method, "POST");
+      assert.equal(request.url, "https://challenges.cloudflare.com/turnstile/v0/siteverify");
+      assert.deepEqual(Object.fromEntries(await request.formData()), {
+        secret: turnstileEnv.TURNSTILE_SECRET_KEY, response: token, remoteip: ip
+      });
+    }
+  });
+
+  it("requires a literal success, the signup action and an exact hostname", async (t) => {
+    const invalidResults = [
+      { ...approved, success: "true" },
+      { success: true, hostname: approved.hostname },
+      { ...approved, action: "reset" },
+      { success: true, action: "signup" },
+      { ...approved, hostname: "preview.app.formbook.ca" },
+      { ...approved, hostname: "app.formbook.ca.example" },
+      null
+    ];
+    let result: unknown;
+    t.mock.method(globalThis, "fetch", async () => Response.json(result));
+    for (result of invalidResults) {
+      assert.equal(await verifyTurnstile(token, ip, turnstileEnv), false, JSON.stringify(result));
+    }
+  });
+
+  it("rejects an expired or already used response reported by Cloudflare", async (t) => {
+    t.mock.method(globalThis, "fetch", async () =>
+      Response.json({ ...approved, success: false, "error-codes": ["timeout-or-duplicate"] })
+    );
+    assert.equal(await verifyTurnstile(token, ip, turnstileEnv), false);
+  });
+
+  it("fails closed on malformed JSON, an HTTP failure or a broken connection", async (t) => {
+    const fakeFetch = t.mock.method(globalThis, "fetch", async () => new Response("not json"));
+    assert.equal(await verifyTurnstile(token, ip, turnstileEnv), false);
+    fakeFetch.mock.mockImplementation(async () => Response.json(approved, { status: 503 }));
+    assert.equal(await verifyTurnstile(token, ip, turnstileEnv), false);
+    fakeFetch.mock.mockImplementation(async () => { throw new TypeError("Offline test"); });
+    assert.equal(await verifyTurnstile(token, ip, turnstileEnv), false);
+  });
+
+  it("only sends nonblank tokens up to 2048 characters", async (t) => {
+    const fakeFetch = t.mock.method(globalThis, "fetch", async () => Response.json(approved));
+    for (const invalid of [null, "", "  ", "x".repeat(2049)]) {
+      assert.equal(await verifyTurnstile(invalid, ip, turnstileEnv), false);
+    }
+    assert.equal(fakeFetch.mock.callCount(), 0);
+    assert.equal(await verifyTurnstile("x".repeat(2048), ip, turnstileEnv), true);
+    assert.equal(fakeFetch.mock.callCount(), 1);
+  });
+
+  it("refuses any production allowlist containing a local host before contacting Siteverify", async (t) => {
+    const fakeFetch = t.mock.method(globalThis, "fetch", async () => Response.json(approved));
+    for (const host of ["localhost", "signup.localhost", "127.0.0.1"]) {
+      const env = { ...turnstileEnv, TURNSTILE_HOSTNAMES: productionHosts.concat(host).join(",") };
+      assert.equal(turnstileMode(env), "missing", host);
+      assert.equal(await verifyTurnstile(token, ip, env), false, host);
+    }
+    assert.equal(fakeFetch.mock.callCount(), 0);
   });
 });

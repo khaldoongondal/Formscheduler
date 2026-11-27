@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
+import { PRODUCT_ICONS } from "@/lib/marketing/site";
 import Link from "next/link";
-import { MailCheck } from "lucide-react";
 import { resendVerificationAction } from "@/app/signup/check-email/actions";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { RESEND_RATE_LIMITED_MESSAGE } from "@/lib/validation/signup";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
+  icons: PRODUCT_ICONS,
   title: "Check your email"
 };
 
@@ -25,57 +26,47 @@ export default async function CheckEmailPage({
   const error = typeof params.error === "string" && RESEND_ERRORS.has(params.error) ? params.error : null;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <MailCheck className="h-5 w-5" />
-          </div>
-          <CardTitle>Check your email</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-slate-700">
-            We sent a verification link to {email ? <strong>{email}</strong> : "your email address"}. Open it on
-            this device to finish setting up your account.
-          </p>
-          <p className="text-sm text-slate-500">No email after a few minutes? Check your spam folder, or send it again.</p>
+    <AuthShell title="Check your email">
+      <p className="text-sm text-slate-700">
+        We sent a verification link to {email ? <strong>{email}</strong> : "your email address"}. Open it on
+        this device to finish setting up your account.
+      </p>
+      <p className="text-sm text-slate-500">No email after a few minutes? Check your spam folder, or send it again.</p>
 
-          {params.sent ? (
-            <p className="text-sm text-slate-700" role="status">
-              If an account is waiting for verification, we sent a new link. We send at most one link every three
-              minutes, so if you just asked for one, wait a few minutes before trying again.
-            </p>
-          ) : null}
-          {error ? (
-            <p className="text-sm text-red-600" role="alert">
-              {error}
-            </p>
-          ) : null}
+      {params.sent ? (
+        <p className="text-sm text-slate-700" role="status">
+          If an account is waiting for verification, we sent a new link. We send at most one link every three
+          minutes, so if you just asked for one, wait a few minutes before trying again.
+        </p>
+      ) : null}
+      {error ? (
+        <p className="text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      ) : null}
 
-          {email ? (
-            <form action={resendVerificationAction}>
-              <input type="hidden" name="email" value={email} />
-              <Button className="w-full" type="submit" variant="outline">
-                Send the link again
-              </Button>
-            </form>
-          ) : null}
+      {email ? (
+        <form action={resendVerificationAction}>
+          <input type="hidden" name="email" value={email} />
+          <Button className="w-full" type="submit" variant="outline">
+            Send the link again
+          </Button>
+        </form>
+      ) : null}
 
-          <p className="text-sm text-slate-700">
-            Already verified your email, or this address already has an account? Sign in, or use{" "}
-            <Link className="font-semibold underline underline-offset-2" href="/auth/reset-password">
-              Forgot password
-            </Link>{" "}
-            to get a new link and set a new password.
-          </p>
+      <p className="text-sm text-slate-700">
+        Already verified your email, or this address already has an account? Sign in, or use{" "}
+        <Link className="font-semibold underline underline-offset-2" href="/auth/reset-password">
+          Forgot password
+        </Link>{" "}
+        to get a new link and set a new password.
+      </p>
 
-          <p className="text-center text-sm text-slate-500">
-            <Link className="underline underline-offset-2" href="/login">
-              Back to sign in
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </main>
+      <p className="text-center text-sm text-slate-500">
+        <Link className="underline underline-offset-2" href="/login">
+          Back to sign in
+        </Link>
+      </p>
+    </AuthShell>
   );
 }

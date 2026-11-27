@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { PRODUCT_ICONS } from "@/lib/marketing/site";
 import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page";
 import { CONTACT_EMAIL } from "@/lib/billing/plans";
 
 export const metadata = {
+  icons: PRODUCT_ICONS,
   title: "Data Processing Addendum",
   description: "How lead data is processed for FormBook customers."
 };
@@ -10,6 +12,7 @@ export const metadata = {
 export default function DpaPage() {
   return (
     <LegalPage
+      current="/dpa"
       title="Data Processing Addendum"
       intro={
         <p>

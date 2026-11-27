@@ -31,7 +31,7 @@ export function DateRangeFilter({
 }) {
   const presets = [...extraPresets, ...BASE_RANGE_PRESETS];
   return (
-    <form className="mt-3 grid gap-3 md:grid-cols-[190px_170px_170px_auto] md:items-end">
+    <form className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
       <div className="space-y-1.5">
         <Label htmlFor="analytics-preset" className="text-xs text-slate-500">
           Range

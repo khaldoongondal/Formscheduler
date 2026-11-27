@@ -6,6 +6,9 @@ import type { Metadata } from "next";
 
 export const DEFAULT_APP_URL = "https://app.formbook.ca";
 
+/** Opt-in on product pages so a customer's booking links retain their own identity. */
+export const PRODUCT_ICONS = { icon: "/brand/formbook-mark.png" } satisfies Metadata["icons"];
+
 /**
  * The only mention of the company outside the legal text: one small, quiet
  * footer line on the public marketing, help and legal pages. Never on
@@ -22,6 +25,7 @@ export const SITE_DESCRIPTION =
  * customer form pages must not inherit the product title, cards or og:url.
  */
 export const HOME_METADATA: Metadata = {
+  icons: PRODUCT_ICONS,
   title: { absolute: SITE_TITLE },
   description: SITE_DESCRIPTION,
   applicationName: "FormBook",

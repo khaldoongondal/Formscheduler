@@ -39,18 +39,18 @@ export function PlanUsage({
   const anyFrozen = frozenForms > 0 || frozenPixels > 0;
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-950">{plan.name} plan</h2>
-        <p className="text-sm font-medium text-slate-600">{formatPlanPrice(plan)}</p>
+    <section className="workspace-plan">
+      <div className="workspace-plan-heading">
+        <h2>{plan.name} plan</h2>
+        <p>{formatPlanPrice(plan)}</p>
       </div>
-      <div className={pixelCount === null ? "mt-4 grid gap-4 md:grid-cols-2" : "mt-4 grid gap-4 md:grid-cols-3"}>
+      <div className="workspace-meters">
         <UsageMeter label="Active forms" used={usage.activeForms} max={plan.maxActiveForms} />
         <UsageMeter label="Drafts" used={usage.draftForms} max={plan.maxDraftForms} />
         {pixelCount === null ? null : <UsageMeter label="Meta pixels" used={pixelCount} max={plan.maxPixels} />}
       </div>
       {activeFull || draftsFull || anyFrozen ? (
-        <div className="mt-4 space-y-1 text-sm leading-6 text-amber-900">
+        <div className="workspace-plan-notes mt-4 space-y-1 text-sm leading-6">
           {activeFull ? (
             <p>
               {PLAN_COPY.usageActiveFull(plan.maxActiveForms)}
@@ -84,11 +84,11 @@ function UsageMeter({ label, used, max }: { label: string; used: number; max: nu
   const full = used >= max;
   return (
     <div>
-      <p className="text-sm text-slate-700">
-        {label}: <span className="font-semibold text-slate-950">{used}</span> of {max}
+      <p className="workspace-meter-label">
+        <span>{label}</span><span><b>{used}</b> of {max}</span>
       </p>
       <div
-        className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100"
+        className="workspace-meter-track"
         role="progressbar"
         aria-label={label}
         aria-valuemin={0}
@@ -96,7 +96,7 @@ function UsageMeter({ label, used, max }: { label: string; used: number; max: nu
         aria-valuenow={used}
       >
         <div
-          className={full ? "h-full rounded-full bg-amber-500" : "h-full rounded-full bg-emerald-500"}
+          className={full ? "workspace-meter-fill is-full" : "workspace-meter-fill"}
           style={{ width: `${percent}%` }}
         />
       </div>

@@ -483,7 +483,7 @@ Set every variable in `.env.example`:
 | `FORMBOOK_GHL_SIGNUP_WEBHOOK_URL` | **Required.** Inbound webhook URL from step 6. Without it, `/signup` refuses new accounts in production (and on preview deployments) and logs an error: the Supabase fallback email only works in the same browser and its resend link does not work with `/auth/confirm`, so it is for local development only. |
 | `FORMBOOK_GHL_PASSWORD_RESET_WEBHOOK_URL` | Inbound webhook URL from step 6 |
 | `FORMBOOK_SETUP_CALL_URL` | The owner's booking link for the free setup call |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | **Required.** From Cloudflare Turnstile (add both hostnames to the widget). Without both, `/signup` refuses new accounts in production and logs an error. Preview deployments need them too (Cloudflare publishes test keys that always pass). |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_HOSTNAMES` | **Required for signup.** Use the existing widget's public site key and server-only secret. For production, set the comma-separated hostname list to `app.formbook.ca,formbooking.gondaltech.app`. The server accepts only successful Siteverify results for the `signup` action on an exact listed hostname. Build a new deployment after changing the public key. Use a separate widget and exact preview hostname for a full preview signup test. |
 
 Confirm `LEADDER_DEFAULT_TENANT_ID` and `LEADDER_DEMO_SLOT_MODE` are **not** set in production. `LEADDER_DEFAULT_TENANT_ID` also turns on the local owner bypass outside production.
 

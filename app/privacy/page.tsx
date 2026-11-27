@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { PRODUCT_ICONS } from "@/lib/marketing/site";
 import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page";
 import { CONTACT_EMAIL } from "@/lib/billing/plans";
 
 export const metadata = {
+  icons: PRODUCT_ICONS,
   title: "Privacy Policy",
   description: "How FormBook handles personal data."
 };
@@ -10,6 +12,7 @@ export const metadata = {
 export default function PrivacyPage() {
   return (
     <LegalPage
+      current="/privacy"
       title="Privacy Policy"
       intro={
         <p>

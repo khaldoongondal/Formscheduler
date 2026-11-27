@@ -1,0 +1,27 @@
+.page {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  min-height: 60vh;
+  padding: clamp(1.25rem, 5vw, 4.5rem);
+  color: var(--jardin-forest, #193c35);
+  background: var(--jardin-paper, #f5f5ed);
+  font-family: var(--font-sans, sans-serif);
+}
+.notice {
+  width: min(100%, 43rem);
+  border-block-start: 3px solid var(--jardin-iris, #806399);
+  padding: clamp(1.25rem, 4vw, 2.65rem);
+  background: #fffef9;
+}
+.eyebrow { font-size: 0.75rem; font-weight: 650; letter-spacing: 0.09em; text-transform: uppercase; }
+.notice h1 {
+  margin-block: 0.85rem;
+  font: 400 clamp(2.4rem, 5vw, 3.6rem) / 1.05 var(--font-display, Georgia, serif);
+  letter-spacing: -0.04em;
+}
+.description, .instructions { color: #4f6058; font-size: 0.95rem; line-height: 1.65; }
+.variables { border-block: 1px solid #d3d7cb; margin-block: 1.6rem; padding-block: 1.15rem; }
+.variables h2 { font-size: 0.92rem; font-weight: 650; }
+.variables li { margin-top: 0.5rem; }
+.notice code { overflow-wrap: anywhere; font-size: 0.87rem; }

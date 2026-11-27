@@ -69,11 +69,10 @@ export default async function FunnelsPage({
       : null;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="workspace-dashboard">
+      <header className="workspace-heading">
         <div>
-          <p className="text-sm font-semibold text-emerald-700">Funnels</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Booking funnels</h1>
+          <h1>Booking funnels</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
             Choose a funnel to manage its questions, calendar and CRM, theme, booking links, and performance.
           </p>
@@ -84,87 +83,96 @@ export default async function FunnelsPage({
             New funnel
           </Button>
         ) : (
-          <Button asChild variant="outline">
+          <Button asChild>
             <Link href="/admin/funnels?create=1#create-funnel">
               <Plus className="h-4 w-4" />
               New funnel
             </Link>
           </Button>
         )}
-      </div>
+      </header>
+      <div className="workspace-dashboard-grid">
+        <div className="workspace-library">
+          {actionError ? <ActionError message={actionError} /> : null}
+          {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
 
-      <SetupChecklist state={onboarding} returnTo="/admin/funnels" />
-      <SetupCallCard moment={onboarding.setupCall.moment} url={onboarding.setupCall.url} returnTo="/admin/funnels" />
+          {showCreateForm ? (
+            <CreateFunnelCard
+              canCancel={funnels.length > 0}
+              blockedMessage={createBlockedMessage}
+              template={typeof query.template === "string" ? query.template : null}
+            />
+          ) : null}
 
-      <PlanUsage
-        state={planSummary.state}
-        plan={planSummary.plan}
-        usage={planSummary.usage}
-        pixelCount={planSummary.unfrozenPixelCount}
-        frozenForms={planSummary.frozen.forms}
-        frozenPixels={planSummary.frozen.pixels}
-      />
-
-      {actionError ? <ActionError message={actionError} /> : null}
-      {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
-
-      {showCreateForm ? (
-        <CreateFunnelCard
-          canCancel={funnels.length > 0}
-          blockedMessage={createBlockedMessage}
-          template={typeof query.template === "string" ? query.template : null}
-        />
-      ) : null}
-
-      <section className="grid gap-4">
-        {funnels.map((funnel) => (
-          <article
-            key={funnel.id}
-            className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md"
-          >
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-semibold text-slate-950">{funnel.name}</h2>
-                  {!funnel.is_published && funnel.frozen_at ? <FrozenBadge /> : <StatusBadge published={funnel.is_published} />}
-                  {funnel.taken_down_at ? <TakenDownBadge /> : null}
-                  {runningTests.has(funnel.id) ? <SplitTestBadge /> : null}
-                  {needsSetup(funnel) ? <NeedsSetupBadge /> : null}
+          <section aria-label="Your funnels" className="workspace-library-list">
+            {funnels.length > 0 ? (
+              <div className="workspace-list-heading">
+                <h2>Your funnels</h2>
+                <span>{funnels.length} {funnels.length === 1 ? "funnel" : "funnels"}</span>
+              </div>
+            ) : null}
+            {funnels.map((funnel) => (
+              <article
+                key={funnel.id}
+                className="workspace-funnel-row"
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3><Link href={`/admin/funnels/${funnel.id}`}>{funnel.name}</Link></h3>
+                      {!funnel.is_published && funnel.frozen_at ? <FrozenBadge /> : <StatusBadge published={funnel.is_published} />}
+                      {funnel.taken_down_at ? <TakenDownBadge /> : null}
+                      {runningTests.has(funnel.id) ? <SplitTestBadge /> : null}
+                      {needsSetup(funnel) ? <NeedsSetupBadge /> : null}
+                    </div>
+                    <p className="workspace-funnel-slug">/{funnel.slug}</p>
+                    {funnel.description ? (
+                      <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{funnel.description}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {funnel.is_published ? (
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={`/book/${funnel.slug}`} target="_blank">
+                          <ExternalLink className="h-4 w-4" />
+                          Preview
+                        </Link>
+                      </Button>
+                    ) : null}
+                    <Button asChild size="sm">
+                      <Link href={`/admin/funnels/${funnel.id}`}>
+                        Manage
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
-                <p className="mt-1 text-sm text-slate-500">/{funnel.slug}</p>
-                {funnel.description ? (
-                  <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{funnel.description}</p>
-                ) : null}
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                {funnel.is_published ? (
-                  <Button asChild variant="ghost" size="sm">
-                    <Link href={`/book/${funnel.slug}`} target="_blank">
-                      <ExternalLink className="h-4 w-4" />
-                      Preview
-                    </Link>
-                  </Button>
-                ) : null}
-                <Button asChild size="sm">
-                  <Link href={`/admin/funnels/${funnel.id}`}>
-                    Manage
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          </article>
-        ))}
+              </article>
+            ))}
 
-        {funnels.length === 0 ? (
-          <Card>
-            <CardContent className="p-8 text-center">
-              <h2 className="text-lg font-semibold text-slate-950">No funnels yet</h2>
-              <p className="mt-2 text-sm text-slate-600">Create your first booking funnel, then choose its calendar and CRM.</p>
-            </CardContent>
-          </Card>
-        ) : null}
-      </section>
+            {funnels.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <h2 className="text-lg font-semibold text-slate-950">No funnels yet</h2>
+                  <p className="mt-2 text-sm text-slate-600">Create your first booking funnel, then choose its calendar and CRM.</p>
+                </CardContent>
+              </Card>
+            ) : null}
+          </section>
+        </div>
+        <aside className="workspace-dashboard-aside" aria-label="Workspace plan and setup">
+          <PlanUsage
+            state={planSummary.state}
+            plan={planSummary.plan}
+            usage={planSummary.usage}
+            pixelCount={planSummary.unfrozenPixelCount}
+            frozenForms={planSummary.frozen.forms}
+            frozenPixels={planSummary.frozen.pixels}
+          />
+          <SetupChecklist state={onboarding} returnTo="/admin/funnels" />
+          <SetupCallCard moment={onboarding.setupCall.moment} url={onboarding.setupCall.url} returnTo="/admin/funnels" />
+        </aside>
+      </div>
     </div>
   );
 }
@@ -179,7 +187,7 @@ function CreateFunnelCard({
   template: string | null;
 }) {
   return (
-    <Card id="create-funnel" className="max-w-3xl scroll-mt-24">
+    <Card id="create-funnel" className="scroll-mt-24">
         <CardHeader>
           <CardTitle>Create funnel</CardTitle>
           <CardDescription>Start with the essentials. Theme, calendar and CRM, questions, and analytics live inside the funnel workspace.</CardDescription>

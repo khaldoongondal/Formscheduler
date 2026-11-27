@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { PRODUCT_ICONS } from "@/lib/marketing/site";
 import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page";
 import { CONTACT_EMAIL, PLANS, formatPlanPrice } from "@/lib/billing/plans";
 
 export const metadata = {
+  icons: PRODUCT_ICONS,
   title: "Terms of Service",
   description: "The terms for using FormBook."
 };
@@ -17,6 +19,7 @@ function pixelText(count: number): string {
 export default function TermsPage() {
   return (
     <LegalPage
+      current="/terms"
       title="Terms of Service"
       intro={
         <p>

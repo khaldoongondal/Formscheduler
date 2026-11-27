@@ -26,6 +26,7 @@ export default async function EmbedPage({ params }: { params: Promise<{ slug: st
   if (missingEnv.length > 0) {
     return (
       <SetupRequired
+        as="main"
         title="Supabase is required to preview embedded funnels."
         description="Embedded booking routes render funnel configuration and questions from Supabase. Add the database environment variables before opening an embed preview."
         missingEnv={missingEnv}
