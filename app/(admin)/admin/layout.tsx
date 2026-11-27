@@ -12,7 +12,7 @@ const navItems = [
   { href: "/admin/funnels", label: "Funnels", Icon: Rows3 },
   { href: "/admin/split-tests", label: "Split Tests", Icon: Split },
   { href: "/admin/pixels", label: "Meta Pixels", Icon: Radio },
-  { href: "/admin/ghl-connections", label: "GHL Connections", Icon: PlugZap }
+  { href: "/admin/connections", label: "Connections", Icon: PlugZap }
 ];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {

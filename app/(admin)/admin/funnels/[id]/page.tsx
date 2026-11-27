@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { publishReadinessError } from "@/lib/funnels/publish-readiness";
+import { formReadinessError, funnelReadinessInput, readinessConnectionFrom } from "@/lib/connections/readiness";
+import { CONNECTIONS_COPY } from "@/lib/connections/copy";
+import { PROVIDERS, pickerValue, providerLabel } from "@/lib/connections/registry";
+import { listConnections, type ConnectionSummary } from "@/lib/connections/service";
+import type { CalendarKind, CrmKind } from "@/lib/connections/types";
+import { ConnectionPickers } from "@/components/admin/connection-pickers";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -150,7 +155,7 @@ export default async function FunnelDetailPage({
     to: query.to
   });
   const analyticsState: { error: string | null } = { error: null };
-  const [connections, analytics, planSummary, runningTests, spendEntries, pixels, testsUsingForm] = await Promise.all([
+  const [connections, analytics, planSummary, runningTests, spendEntries, pixels, testsUsingForm, genericConnections] = await Promise.all([
     listGhlConnections(funnel.tenant_id),
     getFunnelAnalytics(funnel.id, analyticsRange).catch((error: unknown): FunnelPerformanceRow | null => {
       const message = error instanceof Error ? error.message : "";
@@ -176,6 +181,11 @@ export default async function FunnelDetailPage({
     listSplitTestsUsingFunnel(funnel.tenant_id, funnel.id).catch((error: unknown): FunnelTestUse[] => {
       console.error("[split-tests] form test lookup failed", error instanceof Error ? error.message : "unknown error");
       return [];
+    }),
+    // Empty before migration 0029; the pickers then list GoHighLevel only.
+    listConnections(funnel.tenant_id).catch((error: unknown): ConnectionSummary[] => {
+      console.error("[connections] list failed", error instanceof Error ? error.message : "unknown error");
+      return [];
     })
   ]);
   const deleteBlocker = funnelDeleteBlocker(testsUsingForm);
@@ -199,14 +209,89 @@ export default async function FunnelDetailPage({
   });
   const selectedConnection = connections.find((connection) => connection.id === funnel.ghl_connection_id);
   const actionError = typeof query.error === "string" ? query.error : null;
+  const calendarKind: CalendarKind = funnel.calendar_provider ?? "ghl";
+  const crmKind: CrmKind = funnel.crm_provider ?? "ghl";
+  const calendarConnection =
+    calendarKind !== "ghl" ? genericConnections.find((connection) => connection.id === funnel.calendar_connection_id) ?? null : null;
+  const crmConnection =
+    crmKind !== "ghl" ? genericConnections.find((connection) => connection.id === funnel.crm_connection_id) ?? null : null;
+  const sendsToGhl = crmKind === "ghl";
   // Active forms that cannot take bookings (for example activated before this check existed).
   const bookingSetupWarning = funnel.is_published
-    ? publishReadinessError({
-        ghlConnectionId: selectedConnection?.id ?? null,
-        calendarId: funnel.calendar_id,
-        connectionCalendarId: selectedConnection?.calendar_id ?? null
-      })
+    ? formReadinessError(
+        funnelReadinessInput(
+          funnel,
+          selectedConnection ?? null,
+          readinessConnectionFrom(calendarConnection),
+          readinessConnectionFrom(crmConnection)
+        )
+      )
     : null;
+  const savedCalendarValue =
+    calendarKind === "ghl"
+      ? funnel.ghl_connection_id ? pickerValue("ghl", funnel.ghl_connection_id) : ""
+      : funnel.calendar_connection_id ? pickerValue(calendarKind, funnel.calendar_connection_id) : "";
+  const savedCrmValue =
+    calendarKind === "ghl"
+      ? ""
+      : crmKind === "ghl"
+        ? funnel.ghl_connection_id ? pickerValue("ghl", funnel.ghl_connection_id) : ""
+        : funnel.crm_connection_id ? pickerValue(crmKind, funnel.crm_connection_id) : "";
+  const genericNote = (connection: ConnectionSummary) =>
+    connection.status === "needs_attention"
+      ? CONNECTIONS_COPY.needsAttentionSuffix
+      : connection.status === "disabled"
+        ? CONNECTIONS_COPY.disabledSuffix
+        : null;
+  const ghlPickerOptions = connections.map((connection) => ({
+    value: pickerValue("ghl", connection.id),
+    label: connection.name,
+    provider: "ghl" as const,
+    note: connection.is_active ? null : CONNECTIONS_COPY.inactiveSuffix
+  }));
+  // Unavailable providers are hidden, except the connection this form already uses.
+  const visibleGeneric = (connection: ConnectionSummary) =>
+    PROVIDERS[connection.provider].available ||
+    connection.id === funnel.calendar_connection_id ||
+    connection.id === funnel.crm_connection_id;
+  const calendarPickerOptions = [
+    ...ghlPickerOptions,
+    ...genericConnections
+      .filter((connection) => PROVIDERS[connection.provider].roles.includes("calendar") && visibleGeneric(connection))
+      .map((connection) => ({
+        value: pickerValue(connection.provider as CalendarKind, connection.id),
+        label: connection.name,
+        provider: connection.provider as CalendarKind,
+        note: genericNote(connection)
+      }))
+  ];
+  const crmPickerOptions = [
+    ...ghlPickerOptions,
+    ...genericConnections
+      .filter((connection) => PROVIDERS[connection.provider].roles.includes("crm") && visibleGeneric(connection))
+      .map((connection) => ({
+        value: pickerValue(connection.provider as CrmKind, connection.id),
+        label: connection.name,
+        provider: connection.provider as CrmKind,
+        note: genericNote(connection)
+      }))
+  ];
+  const calendarSummary =
+    calendarKind === "ghl"
+      ? selectedConnection
+        ? `${providerLabel("ghl")}: ${selectedConnection.name}`
+        : CONNECTIONS_COPY.notSet
+      : calendarConnection
+        ? `${providerLabel(calendarKind)}: ${calendarConnection.name}`
+        : CONNECTIONS_COPY.notSet;
+  const crmSummary =
+    crmKind === "ghl"
+      ? selectedConnection
+        ? `${providerLabel("ghl")}: ${selectedConnection.name}`
+        : CONNECTIONS_COPY.notSet
+      : crmConnection
+        ? `${providerLabel(crmKind)}: ${crmConnection.name}`
+        : CONNECTIONS_COPY.notSet;
   const actionSuccess = actionSuccessMessage(query.saved);
   const savedQuestionId = query.saved === "question" || query.saved === "question-order" ? query.question : null;
   const savedOptionId = query.saved === "option" ? query.option : null;
@@ -370,20 +455,27 @@ export default async function FunnelDetailPage({
       <Card>
         <CardHeader>
           <SectionTitle icon={<CalendarClock className="h-5 w-5" />} title="Current handoff" />
-          <CardDescription>This is what the funnel is using right now for GHL account, calendar, and pipeline routing.</CardDescription>
+          <CardDescription>This is what the form is using right now for its calendar, its CRM, and pipeline routing.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-6">
-          <SummaryRow label="GHL connection" value={selectedConnection?.name ?? "Not connected"} />
-          <SummaryRow label="Calendar" value={funnel.calendar_id ?? selectedConnection?.calendar_id ?? "Not set"} />
+          <SummaryRow label="Calendar" value={calendarSummary} />
+          <SummaryRow label="Sends leads to" value={crmSummary} />
+          {calendarKind === "ghl" ? (
+            <SummaryRow label="GoHighLevel calendar" value={funnel.calendar_id ?? selectedConnection?.calendar_id ?? "Not set"} />
+          ) : null}
           <SummaryRow label="Availability" value={`${funnel.availability_window_days ?? 14} days`} />
-          <SummaryRow label="Call not booked stage" value={funnel.opt_in_pipeline_stage_id ?? "Not set"} />
-          <SummaryRow label="Call booked stage" value={funnel.booked_pipeline_stage_id ?? "Not set"} />
-          <SummaryRow label="Disqualified stage" value={funnel.disqualified_pipeline_stage_id ?? "Not set"} />
+          {sendsToGhl ? (
+            <>
+              <SummaryRow label="Call not booked stage" value={funnel.opt_in_pipeline_stage_id ?? "Not set"} />
+              <SummaryRow label="Call booked stage" value={funnel.booked_pipeline_stage_id ?? "Not set"} />
+              <SummaryRow label="Disqualified stage" value={funnel.disqualified_pipeline_stage_id ?? "Not set"} />
+            </>
+          ) : null}
         </CardContent>
       </Card>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <SettingsJump href="#settings" label="Funnel settings" description="Public copy, booking, GHL, routing, and theme." />
+        <SettingsJump href="#settings" label="Funnel settings" description="Public copy, booking, calendar and CRM, routing, and theme." />
         <SettingsJump href="#questions" label="Question flow" description="Contact fields, qualification questions, and answers." />
         <SettingsJump href="#logo" label="Logo" description="Drop in an optional first-screen logo file." />
         <SettingsJump href="#embed-links" label="Embed and links" description="Full-page, iframe, and popup snippets." />
@@ -491,98 +583,111 @@ export default async function FunnelDetailPage({
                       </p>
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Field
-                      label="GHL Opportunity Name Template"
-                      name="opportunity_name_template"
-                      defaultValue={funnel.opportunity_name_template}
-                      required
-                    />
-                    <p className="text-xs leading-5 text-slate-500">
-                      Use <code className="rounded bg-slate-100 px-1 py-0.5">{"{{lead_name}}"}</code> to show only the lead name in GHL. Other tokens: {"{{first_name}}"}, {"{{last_name}}"}, {"{{email}}"}, {"{{phone}}"}, {"{{funnel_name}}"}.
-                    </p>
-                  </div>
+                  {sendsToGhl ? (
+                    <div className="ghl-only space-y-2">
+                      <Field
+                        label="GoHighLevel Opportunity Name Template"
+                        name="opportunity_name_template"
+                        defaultValue={funnel.opportunity_name_template}
+                        required
+                      />
+                      <p className="text-xs leading-5 text-slate-500">
+                        Use <code className="rounded bg-slate-100 px-1 py-0.5">{"{{lead_name}}"}</code> to show only the lead name in GoHighLevel. Other tokens: {"{{first_name}}"}, {"{{last_name}}"}, {"{{email}}"}, {"{{phone}}"}, {"{{funnel_name}}"}.
+                      </p>
+                    </div>
+                  ) : (
+                    <input type="hidden" name="opportunity_name_template" value={funnel.opportunity_name_template} />
+                  )}
                 </SettingsGroup>
 
                 <SettingsGroup
                   icon={<Plug className="h-4 w-4" />}
-                  title="3. GHL connection and calendar"
-                  description="Controls which GHL account and calendar this funnel pulls availability from."
+                  title={CONNECTIONS_COPY.editorSectionTitle}
+                  description={CONNECTIONS_COPY.editorSectionDescription}
                 >
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Label htmlFor="ghl_connection_id">GHL Connection</Label>
-                      <Button asChild variant="ghost" size="sm" className="h-8 px-2 text-xs">
-                        <Link href="/admin/ghl-connections">Manage connections</Link>
-                      </Button>
-                    </div>
-                    <select
-                      id="ghl_connection_id"
-                      name="ghl_connection_id"
-                      className={inputClass}
-                      defaultValue={funnel.ghl_connection_id ?? ""}
-                    >
-                      <option value="">Select connection</option>
-                      {connections.map((connection) => (
-                        <option key={connection.id} value={connection.id}>
-                          {connection.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-[1.5fr_0.75fr_0.75fr]">
-                    <Field label="GHL Calendar ID" name="calendar_id" defaultValue={funnel.calendar_id ?? ""} />
-                    <Field
-                      label="Slot Minutes"
-                      name="slot_duration_minutes"
-                      type="number"
-                      defaultValue={funnel.slot_duration_minutes}
-                      min={15}
-                      max={240}
-                    />
-                    <Field
-                      label="Availability Days"
-                      name="availability_window_days"
-                      type="number"
-                      defaultValue={funnel.availability_window_days ?? 14}
-                      min={1}
-                      max={60}
-                    />
-                  </div>
-                  <p className="text-xs leading-5 text-slate-500">
-                    Smaller availability windows load faster and create more urgency. This does not change the GHL calendar itself.
-                  </p>
+                  <ConnectionPickers
+                    calendarOptions={calendarPickerOptions}
+                    crmOptions={crmPickerOptions}
+                    calendarValue={savedCalendarValue}
+                    crmValue={savedCrmValue}
+                    savedCalendarValue={savedCalendarValue}
+                    savedCrmValue={savedCrmValue}
+                    panels={{
+                      ghl: (
+                        <>
+                          <div className="grid gap-4 md:grid-cols-[1.5fr_0.75fr_0.75fr]">
+                            <Field label="GoHighLevel calendar ID" name="calendar_id" defaultValue={funnel.calendar_id ?? ""} />
+                            <Field
+                              label="Slot Minutes"
+                              name="slot_duration_minutes"
+                              type="number"
+                              defaultValue={funnel.slot_duration_minutes}
+                              min={15}
+                              max={240}
+                            />
+                            <Field
+                              label="Availability Days"
+                              name="availability_window_days"
+                              type="number"
+                              defaultValue={funnel.availability_window_days ?? 14}
+                              min={1}
+                              max={60}
+                            />
+                          </div>
+                          <p className="text-xs leading-5 text-slate-500">
+                            Smaller availability windows load faster and create more urgency. This does not change the GoHighLevel calendar itself.
+                          </p>
+                        </>
+                      )
+                    }}
+                  />
                 </SettingsGroup>
 
-                <SettingsGroup
-                  icon={<ListChecks className="h-4 w-4" />}
-                  title="4. Pipeline routing"
-                  description="Controls where leads move in GHL when they opt in, book, or are disqualified."
-                >
-                  <div className="grid gap-4 lg:grid-cols-3">
-                    <PipelineRoutingGroup
-                      title="Call not booked"
-                      description="Lead submitted the form but has not booked."
+                {sendsToGhl ? (
+                  <div className="ghl-only">
+                    <SettingsGroup
+                      icon={<ListChecks className="h-4 w-4" />}
+                      title="4. Pipeline routing"
+                      description="Controls where leads move in GoHighLevel when they opt in, book, or are disqualified."
                     >
-                      <Field label="Pipeline ID" name="opt_in_pipeline_id" defaultValue={funnel.opt_in_pipeline_id ?? ""} />
-                      <Field label="Stage ID" name="opt_in_pipeline_stage_id" defaultValue={funnel.opt_in_pipeline_stage_id ?? ""} />
-                    </PipelineRoutingGroup>
-                    <PipelineRoutingGroup
-                      title="Call booked"
-                      description="Appointment was created in GHL."
-                    >
-                      <Field label="Pipeline ID" name="booked_pipeline_id" defaultValue={funnel.booked_pipeline_id ?? ""} />
-                      <Field label="Stage ID" name="booked_pipeline_stage_id" defaultValue={funnel.booked_pipeline_stage_id ?? ""} />
-                    </PipelineRoutingGroup>
-                    <PipelineRoutingGroup
-                      title="Disqualified"
-                      description="A selected answer blocks calendar access."
-                    >
-                      <Field label="Pipeline ID" name="disqualified_pipeline_id" defaultValue={funnel.disqualified_pipeline_id ?? ""} />
-                      <Field label="Stage ID" name="disqualified_pipeline_stage_id" defaultValue={funnel.disqualified_pipeline_stage_id ?? ""} />
-                    </PipelineRoutingGroup>
+                      <div className="grid gap-4 lg:grid-cols-3">
+                        <PipelineRoutingGroup
+                          title="Call not booked"
+                          description="Lead submitted the form but has not booked."
+                        >
+                          <Field label="Pipeline ID" name="opt_in_pipeline_id" defaultValue={funnel.opt_in_pipeline_id ?? ""} />
+                          <Field label="Stage ID" name="opt_in_pipeline_stage_id" defaultValue={funnel.opt_in_pipeline_stage_id ?? ""} />
+                        </PipelineRoutingGroup>
+                        <PipelineRoutingGroup
+                          title="Call booked"
+                          description="Appointment was created."
+                        >
+                          <Field label="Pipeline ID" name="booked_pipeline_id" defaultValue={funnel.booked_pipeline_id ?? ""} />
+                          <Field label="Stage ID" name="booked_pipeline_stage_id" defaultValue={funnel.booked_pipeline_stage_id ?? ""} />
+                        </PipelineRoutingGroup>
+                        <PipelineRoutingGroup
+                          title="Disqualified"
+                          description="A selected answer blocks calendar access."
+                        >
+                          <Field label="Pipeline ID" name="disqualified_pipeline_id" defaultValue={funnel.disqualified_pipeline_id ?? ""} />
+                          <Field label="Stage ID" name="disqualified_pipeline_stage_id" defaultValue={funnel.disqualified_pipeline_stage_id ?? ""} />
+                        </PipelineRoutingGroup>
+                      </div>
+                    </SettingsGroup>
                   </div>
-                </SettingsGroup>
+                ) : (
+                  <>
+                    <input type="hidden" name="opt_in_pipeline_id" value={funnel.opt_in_pipeline_id ?? ""} />
+                    <input type="hidden" name="opt_in_pipeline_stage_id" value={funnel.opt_in_pipeline_stage_id ?? ""} />
+                    <input type="hidden" name="booked_pipeline_id" value={funnel.booked_pipeline_id ?? ""} />
+                    <input type="hidden" name="booked_pipeline_stage_id" value={funnel.booked_pipeline_stage_id ?? ""} />
+                    <input type="hidden" name="disqualified_pipeline_id" value={funnel.disqualified_pipeline_id ?? ""} />
+                    <input type="hidden" name="disqualified_pipeline_stage_id" value={funnel.disqualified_pipeline_stage_id ?? ""} />
+                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                      {CONNECTIONS_COPY.ghlPipelinesOnly}
+                    </p>
+                  </>
+                )}
 
                 <SettingsGroup
                   icon={<Brush className="h-4 w-4" />}
@@ -645,7 +750,7 @@ export default async function FunnelDetailPage({
                 <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
                   <SaveSubmitButton label="Save all funnel settings" />
                   {settingsSaved ? <SavedBadge label="Funnel settings saved" /> : null}
-                  <p className="text-sm text-slate-500">Saves public copy, booking, GHL, routing, and theme settings together.</p>
+                  <p className="text-sm text-slate-500">Saves public copy, booking, calendar and CRM, routing, and theme settings together.</p>
                 </div>
               </form>
             </CardContent>
@@ -701,9 +806,20 @@ export default async function FunnelDetailPage({
                         </div>
                         <Field label="Order" name="display_order" type="number" defaultValue={question.display_order} required />
                         <Field label="Placeholder" name="placeholder" defaultValue={question.placeholder ?? ""} />
-                        <Field label="GHL Field Key" name="ghl_field_key" defaultValue={question.ghl_field_key ?? ""} />
-                        <Field label="GHL Custom Field ID" name="ghl_custom_field_id" defaultValue={question.ghl_custom_field_id ?? ""} />
-                        <Field label="GHL Custom Field Key" name="ghl_custom_field_key" defaultValue={question.ghl_custom_field_key ?? ""} />
+                        {sendsToGhl ? (
+                          <>
+                            <Field label="GoHighLevel Field Key" name="ghl_field_key" defaultValue={question.ghl_field_key ?? ""} />
+                            <Field label="GoHighLevel Custom Field ID" name="ghl_custom_field_id" defaultValue={question.ghl_custom_field_id ?? ""} />
+                            <Field label="GoHighLevel Custom Field Key" name="ghl_custom_field_key" defaultValue={question.ghl_custom_field_key ?? ""} />
+                          </>
+                        ) : (
+                          <>
+                            <input type="hidden" name="ghl_field_key" value={question.ghl_field_key ?? ""} />
+                            <input type="hidden" name="ghl_custom_field_id" value={question.ghl_custom_field_id ?? ""} />
+                            <input type="hidden" name="ghl_custom_field_key" value={question.ghl_custom_field_key ?? ""} />
+                            <p className="text-xs leading-5 text-slate-500 md:col-span-2">{CONNECTIONS_COPY.ghlMappingOnly}</p>
+                          </>
+                        )}
                         <div className="space-y-2 md:col-span-2">
                           <Label>Help Text</Label>
                           <Textarea name="help_text" defaultValue={question.help_text ?? ""} />

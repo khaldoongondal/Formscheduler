@@ -19,7 +19,8 @@ import { leadConsentValue } from "@/lib/meta/gating";
 import { onLead, onLeadStage } from "@/lib/meta/hooks";
 import type { QueuedMetaEvent } from "@/lib/meta/queue";
 import { getClientIp, toStorableIp } from "@/lib/security/client-ip";
-import type { Json, LeadAnswer, LeadSession, Question } from "@/lib/types/database";
+import { dispatchCrmEvent } from "@/lib/crm/dispatch";
+import type { Funnel, Json, LeadAnswer, LeadSession, Question } from "@/lib/types/database";
 import { startLeadSessionSchema, submitAnswersSchema } from "@/lib/validation/lead-sessions";
 import { isValidWebsiteValue, normalizeWebsiteValue, websiteValidationMessage } from "@/lib/validation/website";
 
@@ -241,6 +242,43 @@ async function moveDisqualifiedLeadToGhl(
   }
 }
 
+/**
+ * Lead capture for a form whose calendar is not GoHighLevel (decision C5):
+ * the lead reaches potential in the same request with no third-party call,
+ * then the CRM gets lead.captured after the response.
+ */
+async function startGenericLead(
+  session: LeadSession,
+  funnel: Funnel
+): Promise<{ session: LeadSession; metaEvents: Array<QueuedMetaEvent | null> }> {
+  const supabase = createServiceClient();
+  const { data: updatedSession, error: updateError } = await supabase
+    .from("lead_sessions")
+    .update({ status: "potential" })
+    .eq("id", session.id)
+    .select("*")
+    .single();
+
+  if (updateError) throw new Error(updateError.message);
+
+  await trackEvent({
+    tenantId: updatedSession.tenant_id,
+    funnelId: updatedSession.funnel_id,
+    leadSessionId: updatedSession.id,
+    visitorId: updatedSession.visitor_id ?? undefined,
+    splitTestId: updatedSession.split_test_id ?? null,
+    eventType: "lead_captured",
+    sourceUrl: updatedSession.source_url ?? undefined,
+    userAgent: updatedSession.user_agent ?? undefined,
+    metadata: { provider: funnel.calendar_provider ?? "ghl" }
+  });
+
+  // Decision M15: Lead fires when the session reaches potential. Never throws.
+  const leadEvent = await onLead(updatedSession, funnel);
+  dispatchCrmEvent({ type: "lead.captured", funnel, sessionId: updatedSession.id });
+  return { session: updatedSession, metaEvents: [leadEvent] };
+}
+
 export async function startLeadSession(
   input: unknown,
   request?: Request
@@ -366,6 +404,10 @@ export async function startLeadSession(
     // Decision M15: Lead fires when the session reaches potential. Never throws.
     const leadEvent = await onLead(updatedSession, funnel);
     return { session: updatedSession, metaEvents: [leadEvent] };
+  }
+
+  if ((funnel.calendar_provider ?? "ghl") !== "ghl") {
+    return startGenericLead(session, funnel);
   }
 
   try {
@@ -529,7 +571,22 @@ export async function submitLeadAnswers(input: unknown) {
   const disqualifyingOptions = getDisqualifyingAnswerMatches(answers, questions, options);
   if (disqualifyingOptions.length) {
     const disqualifiedSession = await updateLeadSessionStatus(session.id, "disqualified");
-    const syncedSession = await moveDisqualifiedLeadToGhl(disqualifiedSession, disqualifyingOptions);
+    const genericCalendar = (funnel.calendar_provider ?? "ghl") !== "ghl";
+    const syncedSession = genericCalendar
+      ? disqualifiedSession
+      : await moveDisqualifiedLeadToGhl(disqualifiedSession, disqualifyingOptions);
+    if (genericCalendar && !isDemoSlotModeEnabled()) {
+      dispatchCrmEvent({
+        type: "lead.disqualified",
+        funnel,
+        sessionId: session.id,
+        disqualifyingOptions: disqualifyingOptions.map((option) => ({
+          stable_key: option.stable_key,
+          label: option.label,
+          value: option.value
+        }))
+      });
+    }
 
     await trackEvent({
       tenantId: syncedSession.tenant_id,
@@ -581,6 +638,9 @@ export async function submitLeadAnswers(input: unknown) {
   }
 
   const qualifiedEvent = allRequiredAnswered ? await onLeadStage("qualified_lead", updatedSession, funnel) : null;
+  if (allRequiredAnswered && (funnel.calendar_provider ?? "ghl") !== "ghl" && !isDemoSlotModeEnabled()) {
+    dispatchCrmEvent({ type: "lead.qualified", funnel, sessionId: session.id });
+  }
   return {
     session: updatedSession,
     qualified: allRequiredAnswered,
@@ -589,10 +649,31 @@ export async function submitLeadAnswers(input: unknown) {
   };
 }
 
+/** The form's calendar provider; a database without migration 0029 means GoHighLevel. */
+async function getFunnelCalendarProvider(funnelId: string, tenantId: string): Promise<string> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("funnels")
+    .select("calendar_provider")
+    .eq("id", funnelId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) {
+    if (error.code === "42703") return "ghl";
+    throw new Error(error.message);
+  }
+  return (data?.calendar_provider as string | undefined) ?? "ghl";
+}
+
 export async function syncLeadAnswersToGhl(leadSessionId: string) {
   const session = await getLeadSession(leadSessionId);
 
   if (isDemoSlotModeEnabled() || !session.ghl_contact_id) {
+    return;
+  }
+
+  // Forms on another calendar send answers through their CRM event instead.
+  if ((await getFunnelCalendarProvider(session.funnel_id, session.tenant_id)) !== "ghl") {
     return;
   }
 

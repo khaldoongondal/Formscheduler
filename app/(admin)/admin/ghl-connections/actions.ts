@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireTenantRole } from "@/lib/auth/tenant";
+import { CONNECTIONS_COPY } from "@/lib/connections/copy";
+import { listActiveFormsUsingConnection } from "@/lib/connections/service";
 import {
   createGhlConnection,
   deleteGhlConnection,
-  getGhlConnection,
+  getGhlConnectionForTenant,
   updateGhlConnection
 } from "@/lib/ghl/connections";
 
@@ -17,9 +19,9 @@ function optionalString(formData: FormData, key: string) {
 
 async function assertAdminConnection(id: string) {
   const { tenantId } = await requireTenantRole(["owner", "admin"]);
-  const connection = await getGhlConnection(id);
-  if (connection.tenant_id !== tenantId) {
-    throw new Error("GHL connection not found.");
+  const connection = id ? await getGhlConnectionForTenant(id, tenantId) : null;
+  if (!connection) {
+    throw new Error(CONNECTIONS_COPY.notFound);
   }
   return tenantId;
 }
@@ -36,9 +38,9 @@ export async function createGhlConnectionAction(formData: FormData) {
     api_version: optionalString(formData, "api_version") ?? "2023-02-21",
     is_active: formData.get("is_active") === "on"
   });
-  revalidatePath("/admin/ghl-connections");
+  revalidatePath("/admin/connections");
   revalidatePath("/admin/funnels");
-  redirect(`/admin/ghl-connections?saved=created&connection=${connection.id}`);
+  redirect(`/admin/connections?saved=created&connection=${connection.id}`);
 }
 
 export async function updateGhlConnectionAction(formData: FormData) {
@@ -54,16 +56,21 @@ export async function updateGhlConnectionAction(formData: FormData) {
     api_version: optionalString(formData, "api_version") ?? "2023-02-21",
     is_active: formData.get("is_active") === "on"
   });
-  revalidatePath("/admin/ghl-connections");
+  revalidatePath("/admin/connections");
   revalidatePath("/admin/funnels");
-  redirect(`/admin/ghl-connections?saved=connection&connection=${connection.id}`);
+  redirect(`/admin/connections?saved=connection&connection=${connection.id}`);
 }
 
 export async function deleteGhlConnectionAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  await assertAdminConnection(id);
+  const tenantId = await assertAdminConnection(id);
+  // Decision C9: an Active form using this connection blocks the delete.
+  const activeForms = await listActiveFormsUsingConnection(tenantId, id, "ghl");
+  if (activeForms.length) {
+    redirect(`/admin/connections?error=${encodeURIComponent(CONNECTIONS_COPY.deleteBlocked(activeForms.map((form) => form.name)))}`);
+  }
   await deleteGhlConnection(id);
-  revalidatePath("/admin/ghl-connections");
+  revalidatePath("/admin/connections");
   revalidatePath("/admin/funnels");
-  redirect("/admin/ghl-connections?saved=deleted");
+  redirect("/admin/connections?saved=deleted");
 }

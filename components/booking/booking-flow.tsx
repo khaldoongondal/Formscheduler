@@ -98,6 +98,16 @@ const legacyScaffoldColors = new Set(["#111827", "#2563eb", "#3b82f6"]);
 const fingerprintSubmitTimeoutMs = 300;
 let fingerprintPromise: Promise<string | undefined> | null = null;
 
+class RequestError extends Error {
+  constructor(
+    message: string,
+    public status: number
+  ) {
+    super(message);
+    this.name = "RequestError";
+  }
+}
+
 async function postJson<T>(url: string, payload: unknown): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
@@ -107,7 +117,7 @@ async function postJson<T>(url: string, payload: unknown): Promise<T> {
 
   const body = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) {
-    throw new Error(body.error ?? "Request failed.");
+    throw new RequestError(body.error ?? "Request failed.", response.status);
   }
 
   return body as T;
@@ -721,6 +731,10 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       setStep("booked");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to book this slot.");
+      // The time was just taken: show fresh times, keeping the message.
+      if (caught instanceof RequestError && caught.status === 409) {
+        loadSlots(sessionId).catch(() => undefined);
+      }
     } finally {
       setSelectedSlot(null);
     }

@@ -6,14 +6,18 @@ import type { LeadSession } from "@/lib/types/database";
  *
  * Server-only columns never leave the server: the visitor's IP address (sent
  * only to Meta), the consent answer, who released the lead's held Meta events
- * and when (a staff email), and the opaque Meta event reference.
+ * and when (a staff email), the opaque Meta event reference, the lead's
+ * external reference sent to calendars and CRMs, and the CRM record ids.
  */
 export const SERVER_ONLY_SESSION_FIELDS = [
   "ip_address",
   "meta_consent",
   "meta_released_at",
   "meta_released_by",
-  "meta_event_ref"
+  "meta_event_ref",
+  "external_ref",
+  "crm_contact_id",
+  "crm_deal_id"
 ] as const;
 
 type ServerOnlyField = (typeof SERVER_ONLY_SESSION_FIELDS)[number];

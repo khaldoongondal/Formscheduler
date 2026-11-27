@@ -2,7 +2,9 @@ import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
 import { assertFormLimit, planLimitMessageForTenant } from "@/lib/billing/plan-service";
 import { parsePlanState, planLimitMessageFromError, shouldShowBadge } from "@/lib/billing/plans";
-import { publishReadinessError } from "@/lib/funnels/publish-readiness";
+import { formReadinessError, funnelReadinessInput, readinessConnectionFrom } from "@/lib/connections/readiness";
+import { getConnectionRowForTenant, toConnectionSummary } from "@/lib/connections/service";
+import type { CalendarKind, CrmKind } from "@/lib/connections/types";
 import { QUESTION_NOT_FOUND_MESSAGE, questionUpdateFields } from "@/lib/funnels/question-scope";
 import { buildCopySlug, checkSlug } from "@/lib/funnels/slugs";
 import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
@@ -106,9 +108,14 @@ async function getPublicTenantFlags(tenantId: string): Promise<{ suspended: bool
 export const FOREIGN_CONNECTION_MESSAGE = "Choose a GoHighLevel connection from your own account.";
 export const TAKEN_DOWN_COPY_MESSAGE = "This form was taken down and cannot be copied.";
 
-/** Maps the connection trigger error (migration 0021) to the user message. */
+/** Maps the connection trigger errors (migrations 0021 and 0029) to user messages. */
 function connectionMessageFromError(message: string): string | null {
-  return message.includes("FORMBOOK_INVALID:ghl_connection") ? FOREIGN_CONNECTION_MESSAGE : null;
+  if (message.includes("FORMBOOK_INVALID:ghl_connection")) return FOREIGN_CONNECTION_MESSAGE;
+  if (message.includes("FORMBOOK_INVALID:calendar_connection") || message.includes("FORMBOOK_INVALID:crm_connection")) {
+    return FOREIGN_GENERIC_CONNECTION_MESSAGE;
+  }
+  if (message.includes("funnels_ghl_calendar_needs_ghl_crm")) return GHL_PAIRING_MESSAGE;
+  return null;
 }
 
 async function assertConnectionBelongsToTenant(connectionId: string | null | undefined, tenantId: string) {
@@ -117,19 +124,52 @@ async function assertConnectionBelongsToTenant(connectionId: string | null | und
   if (!connection) throw new Error(FOREIGN_CONNECTION_MESSAGE);
 }
 
-async function assertReadyToPublish(input: {
-  tenantId: string;
-  ghlConnectionId: string | null | undefined;
-  calendarId: string | null | undefined;
-}) {
-  const connection = input.ghlConnectionId
-    ? await getGhlConnectionForTenant(input.ghlConnectionId, input.tenantId)
-    : null;
-  const message = publishReadinessError({
-    ghlConnectionId: connection ? connection.id : null,
-    calendarId: input.calendarId,
-    connectionCalendarId: connection?.calendar_id ?? null
-  });
+export const FOREIGN_GENERIC_CONNECTION_MESSAGE = "Choose a connection from your own account.";
+export const GHL_PAIRING_MESSAGE = "A GoHighLevel calendar sends leads to the same GoHighLevel connection.";
+
+/** The form's calendar and CRM columns after an update (existing row merged with the change). */
+export type FunnelConnectionState = {
+  calendar_provider: CalendarKind;
+  calendar_connection_id: string | null;
+  crm_provider: CrmKind;
+  crm_connection_id: string | null;
+  calendar_settings: Record<string, unknown>;
+  crm_settings: Record<string, unknown>;
+  ghl_connection_id: string | null;
+  calendar_id: string | null;
+};
+
+/** Every received generic connection id must be the tenant's own and of the column's provider. */
+async function assertGenericConnectionsBelongToTenant(tenantId: string, state: FunnelConnectionState) {
+  if (state.calendar_provider !== "ghl" && state.calendar_connection_id) {
+    const row = await getConnectionRowForTenant(tenantId, state.calendar_connection_id);
+    if (!row || row.provider !== state.calendar_provider) throw new Error(FOREIGN_GENERIC_CONNECTION_MESSAGE);
+  }
+  if (state.crm_provider !== "ghl" && state.crm_connection_id) {
+    const row = await getConnectionRowForTenant(tenantId, state.crm_connection_id);
+    if (!row || row.provider !== state.crm_provider) throw new Error(FOREIGN_GENERIC_CONNECTION_MESSAGE);
+  }
+}
+
+/** Decision C7: one readiness rule for every calendar and CRM pairing. */
+async function assertReadyToPublish(tenantId: string, state: FunnelConnectionState) {
+  const [ghlConnection, calendarRow, crmRow] = await Promise.all([
+    state.ghl_connection_id ? getGhlConnectionForTenant(state.ghl_connection_id, tenantId) : Promise.resolve(null),
+    state.calendar_provider !== "ghl" && state.calendar_connection_id
+      ? getConnectionRowForTenant(tenantId, state.calendar_connection_id)
+      : Promise.resolve(null),
+    state.crm_provider !== "ghl" && state.crm_connection_id
+      ? getConnectionRowForTenant(tenantId, state.crm_connection_id)
+      : Promise.resolve(null)
+  ]);
+  const message = formReadinessError(
+    funnelReadinessInput(
+      state,
+      ghlConnection,
+      readinessConnectionFrom(calendarRow ? toConnectionSummary(calendarRow) : null),
+      readinessConnectionFrom(crmRow ? toConnectionSummary(crmRow) : null)
+    )
+  );
   if (message) throw new Error(message);
 }
 
@@ -424,6 +464,48 @@ export async function createFunnel(input: unknown) {
   throw new Error("Unable to create funnel because Supabase is missing multiple funnel columns.");
 }
 
+const GENERIC_CONNECTION_FIELDS = [
+  "calendar_provider",
+  "calendar_connection_id",
+  "crm_provider",
+  "crm_connection_id",
+  "calendar_settings",
+  "crm_settings"
+] as const;
+
+type ExistingForUpdate = FunnelConnectionState & { tenant_id: string; is_published: boolean; slug: string };
+
+function asSettings(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/** The row's current state; a database without migration 0029 reads as GoHighLevel for both roles. */
+async function loadExistingForUpdate(id: string): Promise<ExistingForUpdate> {
+  const supabase = createServiceClient();
+  const base = "tenant_id,is_published,slug,ghl_connection_id,calendar_id";
+  const withConnections = `${base},calendar_provider,calendar_connection_id,crm_provider,crm_connection_id,calendar_settings,crm_settings`;
+  let result = await supabase.from("funnels").select(withConnections).eq("id", id).single();
+  if (result.error?.code === "42703") {
+    result = await supabase.from("funnels").select(base).eq("id", id).single();
+  }
+  if (result.error) throw new Error(result.error.message);
+  const row = result.data as unknown as Partial<Funnel> &
+    Pick<Funnel, "tenant_id" | "is_published" | "slug" | "ghl_connection_id" | "calendar_id">;
+  return {
+    tenant_id: row.tenant_id,
+    is_published: row.is_published,
+    slug: row.slug,
+    ghl_connection_id: row.ghl_connection_id,
+    calendar_id: row.calendar_id,
+    calendar_provider: (row.calendar_provider ?? "ghl") as CalendarKind,
+    calendar_connection_id: row.calendar_connection_id ?? null,
+    crm_provider: (row.crm_provider ?? "ghl") as CrmKind,
+    crm_connection_id: row.crm_connection_id ?? null,
+    calendar_settings: asSettings(row.calendar_settings),
+    crm_settings: asSettings(row.crm_settings)
+  };
+}
+
 export async function updateFunnel(input: unknown) {
   const parsed = updateFunnelSchema.parse(input);
   const supabase = createServiceClient();
@@ -441,21 +523,19 @@ export async function updateFunnel(input: unknown) {
   } = parsed;
   let existingTenantId: string | null = null;
   const changesConnection = Boolean(funnel.ghl_connection_id);
-  const touchesConnectionField = Object.prototype.hasOwnProperty.call(funnel, "ghl_connection_id");
-  const touchesCalendarField = Object.prototype.hasOwnProperty.call(funnel, "calendar_id");
+  const touches = (key: string) => Object.prototype.hasOwnProperty.call(funnel, key);
+  const touchesConnectionField = touches("ghl_connection_id");
+  const touchesCalendarField = touches("calendar_id");
+  const touchesGenericField = GENERIC_CONNECTION_FIELDS.some(touches);
   if (
     funnel.is_published === true ||
     funnel.slug !== undefined ||
     changesConnection ||
     touchesConnectionField ||
-    touchesCalendarField
+    touchesCalendarField ||
+    touchesGenericField
   ) {
-    const { data: existing, error: existingError } = await supabase
-      .from("funnels")
-      .select("tenant_id,is_published,slug,ghl_connection_id,calendar_id")
-      .eq("id", id)
-      .single();
-    if (existingError) throw new Error(existingError.message);
+    const existing = await loadExistingForUpdate(id);
     existingTenantId = existing.tenant_id;
 
     // Slug rules run only when the slug changes, so existing forms keep saving.
@@ -466,16 +546,29 @@ export async function updateFunnel(input: unknown) {
     if (changesConnection) {
       await assertConnectionBelongsToTenant(funnel.ghl_connection_id, existing.tenant_id);
     }
+
+    const nextState: FunnelConnectionState = {
+      calendar_provider: funnel.calendar_provider ?? existing.calendar_provider,
+      calendar_connection_id: touches("calendar_connection_id")
+        ? funnel.calendar_connection_id || null
+        : existing.calendar_connection_id,
+      crm_provider: funnel.crm_provider ?? existing.crm_provider,
+      crm_connection_id: touches("crm_connection_id") ? funnel.crm_connection_id || null : existing.crm_connection_id,
+      calendar_settings: funnel.calendar_settings ?? existing.calendar_settings,
+      crm_settings: funnel.crm_settings ?? existing.crm_settings,
+      ghl_connection_id: touchesConnectionField ? funnel.ghl_connection_id || null : existing.ghl_connection_id,
+      calendar_id: touchesCalendarField ? funnel.calendar_id || null : existing.calendar_id
+    };
+    if (touchesGenericField) {
+      await assertGenericConnectionsBelongToTenant(existing.tenant_id, nextState);
+    }
+
     const activating = funnel.is_published === true && !existing.is_published;
     const staysPublished = (funnel.is_published ?? existing.is_published) === true;
     // An Active form must be able to take bookings: checked when it is turned
-    // on, and when an Active form's connection or calendar is changed.
-    if (staysPublished && (activating || touchesConnectionField || touchesCalendarField)) {
-      await assertReadyToPublish({
-        tenantId: existing.tenant_id,
-        ghlConnectionId: touchesConnectionField ? funnel.ghl_connection_id || null : existing.ghl_connection_id,
-        calendarId: touchesCalendarField ? funnel.calendar_id || null : existing.calendar_id
-      });
+    // on, and when an Active form's calendar, CRM or their settings change.
+    if (staysPublished && (activating || touchesConnectionField || touchesCalendarField || touchesGenericField)) {
+      await assertReadyToPublish(existing.tenant_id, nextState);
     }
     if (activating) {
       await assertFormLimit(existing.tenant_id, "activate", id);
@@ -503,6 +596,12 @@ export async function updateFunnel(input: unknown) {
       : {}),
     ...(Object.prototype.hasOwnProperty.call(funnel, "calendar_id")
       ? { calendar_id: funnel.calendar_id || null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(funnel, "calendar_connection_id")
+      ? { calendar_connection_id: funnel.calendar_connection_id || null }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(funnel, "crm_connection_id")
+      ? { crm_connection_id: funnel.crm_connection_id || null }
       : {}),
     ...(Object.prototype.hasOwnProperty.call(funnel, "opt_in_pipeline_id")
       ? { opt_in_pipeline_id: funnel.opt_in_pipeline_id || null }

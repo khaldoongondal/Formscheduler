@@ -22,6 +22,7 @@ import {
   type QuestionDisqualificationOperator
 } from "@/lib/funnels/disqualification";
 import { assertOptionInFunnel, assertQuestionInFunnel } from "@/lib/funnels/question-scope";
+import { PICKER_INVALID_MESSAGE, resolvePickerChoices } from "@/lib/connections/registry";
 import { addFormSpend, deleteFormSpend } from "@/lib/spend/service";
 import { funnelDeleteBlocker } from "@/lib/split-tests/rules";
 import { listSplitTestsUsingFunnel } from "@/lib/split-tests/service";
@@ -252,11 +253,41 @@ export async function createFunnelAction(formData: FormData) {
   redirect(`/admin/funnels/${funnelId}?saved=created#settings`);
 }
 
+/**
+ * The calendar and CRM pickers (P1.11). Returns the funnel columns to save,
+ * or null when the form did not post the pickers. The generic columns are
+ * sent only once migration 0029 is applied, so older databases keep saving.
+ */
+function connectionChoiceFromForm(
+  formData: FormData,
+  hasConnectionColumns: boolean
+): Record<string, string | null> | null {
+  if (!formData.has("calendar_choice")) return null;
+  const resolution = resolvePickerChoices(
+    String(formData.get("calendar_choice") ?? ""),
+    String(formData.get("crm_choice") ?? "")
+  );
+  if (!resolution.ok) throw new Error(resolution.message);
+  const value = resolution.value;
+  if (!hasConnectionColumns) {
+    if (value.calendar_provider !== "ghl" || value.crm_provider !== "ghl") throw new Error(PICKER_INVALID_MESSAGE);
+    return { ghl_connection_id: value.ghl_connection_id ?? "" };
+  }
+  return {
+    ghl_connection_id: value.ghl_connection_id ?? "",
+    calendar_provider: value.calendar_provider,
+    calendar_connection_id: value.calendar_connection_id ?? "",
+    crm_provider: value.crm_provider,
+    crm_connection_id: value.crm_connection_id ?? ""
+  };
+}
+
 export async function updateFunnelAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  await assertAdminFunnel(id);
+  const { funnel } = await assertAdminFunnel(id);
 
   try {
+    const connectionChoice = connectionChoiceFromForm(formData, funnel.calendar_provider !== undefined);
     await updateFunnel({
       id,
       name: String(formData.get("name") ?? ""),
@@ -265,10 +296,15 @@ export async function updateFunnelAction(formData: FormData) {
       show_intro_headline: formData.get("show_intro_headline") === "on",
       show_intro_description: formData.get("show_intro_description") === "on",
       redirect_url: optionalString(formData, "redirect_url"),
-      ghl_connection_id: optionalString(formData, "ghl_connection_id"),
-      calendar_id: optionalString(formData, "calendar_id"),
-      slot_duration_minutes: Number(formData.get("slot_duration_minutes") ?? 30),
-      availability_window_days: Number(formData.get("availability_window_days") ?? 14),
+      ...(connectionChoice ?? { ghl_connection_id: optionalString(formData, "ghl_connection_id") }),
+      // A calendar panel that is not shown is disabled and posts nothing: keep the saved values.
+      ...(formData.has("calendar_id") ? { calendar_id: optionalString(formData, "calendar_id") } : {}),
+      ...(formData.has("slot_duration_minutes")
+        ? { slot_duration_minutes: Number(formData.get("slot_duration_minutes") ?? 30) }
+        : {}),
+      ...(formData.has("availability_window_days")
+        ? { availability_window_days: Number(formData.get("availability_window_days") ?? 14) }
+        : {}),
       opt_in_pipeline_id: optionalString(formData, "opt_in_pipeline_id"),
       opt_in_pipeline_stage_id: optionalString(formData, "opt_in_pipeline_stage_id"),
       booked_pipeline_id: optionalString(formData, "booked_pipeline_id"),

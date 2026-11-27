@@ -130,6 +130,17 @@ export interface Funnel {
   meta_consent_checkbox_label?: string | null;
   /** Set on demo forms made by scripts/seed-demo.mjs (migration 0028). */
   demo_seed_batch?: string | null;
+  /**
+   * Calendar and CRM choice (migration 0029). Undefined before it is applied,
+   * which means GoHighLevel for both roles. The GoHighLevel connection for
+   * either role stays in ghl_connection_id.
+   */
+  calendar_provider?: "ghl" | "google_calendar" | "calcom" | "calendly";
+  calendar_connection_id?: string | null;
+  crm_provider?: "ghl" | "hubspot" | "webhook";
+  crm_connection_id?: string | null;
+  calendar_settings?: Json;
+  crm_settings?: Json;
   created_at: string;
   updated_at: string;
 }
@@ -205,6 +216,14 @@ export interface LeadSession {
    * authorises the public lead APIs.
    */
   meta_event_ref?: string | null;
+  /**
+   * Opaque lead id sent to calendars, CRMs and webhooks (migration 0029).
+   * Never the session id, which authorises the public lead APIs.
+   */
+  external_ref?: string;
+  /** Contact and deal ids in a non-GoHighLevel CRM (migration 0029). */
+  crm_contact_id?: string | null;
+  crm_deal_id?: string | null;
   started_at: string;
   qualified_at: string | null;
   slots_shown_at: string | null;
@@ -258,6 +277,44 @@ export interface BookingAttempt {
   error_message: string | null;
   request_payload: Json;
   response_payload: Json;
+  /** Migration 0029. Null on GoHighLevel rows written before it. */
+  provider?: "ghl" | "google_calendar" | "calcom" | "calendly" | null;
+  calendar_connection_id?: string | null;
+  external_booking_id?: string | null;
+  meeting_url?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ConnectionProvider = "google_calendar" | "calcom" | "calendly" | "hubspot" | "webhook";
+export type ConnectionStatusValue = "connected" | "needs_attention" | "disabled";
+
+/**
+ * A calendar or CRM connection other than GoHighLevel (migration 0029).
+ * Holds ciphertext: server-only. UI code gets a ConnectionSummary instead.
+ */
+export interface Connection {
+  id: string;
+  tenant_id: string;
+  provider: ConnectionProvider;
+  name: string;
+  status: ConnectionStatusValue;
+  status_message: string | null;
+  account_label: string | null;
+  external_account_id: string | null;
+  secret_ciphertext: string | null;
+  secret_last_four: string | null;
+  refresh_token_ciphertext: string | null;
+  token_expires_at: string | null;
+  signing_secret_ciphertext: string | null;
+  signing_secret_last_four: string | null;
+  endpoint_url: string | null;
+  settings: Json;
+  availability: Json | null;
+  availability_confirmed_at: string | null;
+  last_checked_at: string | null;
+  last_check_ok: boolean | null;
+  last_check_summary: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -535,6 +592,7 @@ export interface Database {
       ad_spend_entries: Table<AdSpendEntry>;
       meta_pixels: Table<MetaPixel>;
       meta_event_deliveries: Table<MetaEventDelivery>;
+      connections: Table<Connection>;
     };
     Views: Record<string, never>;
     Functions: {

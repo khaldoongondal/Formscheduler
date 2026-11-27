@@ -76,7 +76,7 @@ export default async function WelcomePage() {
         </Button>
         <Link
           className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950"
-          href="/admin/ghl-connections"
+          href="/admin/connections"
         >
           <PlugZap className="h-4 w-4 text-primary" />
           Connect GoHighLevel

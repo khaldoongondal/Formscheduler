@@ -32,6 +32,12 @@ export const funnelThemeSchema = z.object({
   logo_alignment: z.enum(["left", "center"]).default("left")
 });
 
+/** A form's provider settings object; small and JSON only. */
+export const connectionSettingsSchema = z
+  .record(z.unknown())
+  .refine((value) => JSON.stringify(value).length <= 4000, "These settings are too large.")
+  .transform((value) => value as { [key: string]: Json });
+
 export const createFunnelSchema = z.object({
   tenant_id: z.string().uuid(),
   name: z.string().min(2).max(120),
@@ -75,7 +81,15 @@ export const updateFunnelSchema = createFunnelSchema
   .partial()
   .extend({
     id: z.string().uuid(),
-    is_published: z.boolean().optional()
+    is_published: z.boolean().optional(),
+    // Calendar and CRM choice (Sprint 3, migration 0029). Per-provider
+    // settings schemas are applied in the action (P2, P3).
+    calendar_provider: z.enum(["ghl", "google_calendar", "calcom", "calendly"]).optional(),
+    crm_provider: z.enum(["ghl", "hubspot", "webhook"]).optional(),
+    calendar_connection_id: z.string().uuid().optional().or(z.literal("")).nullable(),
+    crm_connection_id: z.string().uuid().optional().or(z.literal("")).nullable(),
+    calendar_settings: connectionSettingsSchema.optional(),
+    crm_settings: connectionSettingsSchema.optional()
   });
 
 export const questionSchema = z.object({

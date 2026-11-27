@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false
   },
+  async redirects() {
+    // The GoHighLevel connections page became Connections. Not permanent, and the
+    // query string is kept, so the GoHighLevel sign-in return lands with its message.
+    return [{ source: "/admin/ghl-connections", destination: "/admin/connections", permanent: false }];
+  },
   async headers() {
     return [
       { source: "/:path*", headers: commonSecurityHeaders },
