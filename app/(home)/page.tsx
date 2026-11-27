@@ -56,7 +56,6 @@ export default function HomePage() {
               <CalendarDays className="h-5 w-5" />
             </span>
             <span className="text-lg tracking-tight">{HOME_COPY.brandName}</span>
-            <span className="hidden text-xs font-normal text-slate-600 sm:inline">{HOME_COPY.brandBy}</span>
           </Link>
           <nav aria-label="Account" className="flex items-center gap-2 sm:gap-4">
             <Link href={HOME_COPY.secondaryCta.href} className={`${textLink} text-sm font-medium text-slate-700`}>
@@ -282,7 +281,7 @@ export default function HomePage() {
               {CONTACT_EMAIL}
             </a>
           </p>
-          <p>{HOME_COPY.footerLine}</p>
+          <p className="text-xs text-slate-400">{HOME_COPY.footerLine}</p>
         </div>
       </footer>
     </div>

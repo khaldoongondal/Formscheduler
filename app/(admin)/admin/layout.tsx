@@ -33,7 +33,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
               <CalendarDays className="h-5 w-5" />
             </span>
             <span className="text-lg tracking-tight">FormBook</span>
-            <span className="hidden text-xs font-normal text-slate-500 sm:inline">by Gondal Tech</span>
           </Link>
           <form action={signOut}>
             <Button type="submit" variant="ghost" size="sm" className="text-slate-500 hover:text-slate-900">

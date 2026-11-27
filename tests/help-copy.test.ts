@@ -61,8 +61,9 @@ describe("HELP_COPY", () => {
     assert.ok(!WEBHOOK_EXAMPLE_JSON.includes(EM_DASH));
   });
 
-  it("names the product as FormBook, a tool from Gondal Tech", () => {
-    assert.equal(HELP_COPY.subtitle, "FormBook, a tool from Gondal Tech");
+  it("names the product as FormBook only, with no company name", () => {
+    assert.equal(HELP_COPY.subtitle, "FormBook help");
+    for (const text of allStrings(HELP_COPY)) assert.doesNotMatch(text, /Gondal/i, text);
     assert.equal(HELP_COPY.title, "Connecting your calendar and CRM");
   });
 

@@ -26,7 +26,7 @@ export const PLAN_COPY = {
   usageActiveFull: (max: number) => `You are using all ${max} active forms. Switch a form to draft to activate another.`,
   usageDraftsFull: (max: number) => `You are using all ${max} drafts. Delete a draft to create a new form.`,
   upgradeTitle: "Upgrade to Scaling",
-  upgradePrice: `${formatPlanPrice(scaling)}, billed monthly through a Gondal Tech payment page.`,
+  upgradePrice: `${formatPlanPrice(scaling)}, billed monthly through a secure payment page.`,
   addsHeading: "What Scaling adds",
   addsItems: [
     `Up to ${scaling.maxActiveForms} active forms (you have ${free.maxActiveForms} now)`,
@@ -36,7 +36,7 @@ export const PLAN_COPY = {
   ],
   upgradeButton: "Upgrade to Scaling",
   upgradeNote:
-    "You finish the payment on a Gondal Tech page. Your plan changes here once the payment is confirmed. If you can, pay with the email address you use for FormBook.",
+    "You finish the payment on a secure payment page. Your plan changes here once the payment is confirmed. If you can, pay with the email address you use for FormBook.",
   upgradeByEmail: "To move to Scaling, email",
   billingTitle: "Billing",
   onScaling: "You are on the Scaling plan.",

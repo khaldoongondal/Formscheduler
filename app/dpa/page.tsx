@@ -4,7 +4,7 @@ import { CONTACT_EMAIL } from "@/lib/billing/plans";
 
 export const metadata = {
   title: "Data Processing Addendum",
-  description: "How Gondal Tech processes lead data for FormBook customers."
+  description: "How lead data is processed for FormBook customers."
 };
 
 export default function DpaPage() {

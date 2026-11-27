@@ -38,12 +38,12 @@ export const CHECKLIST_COPY = {
 export const SETUP_CALL_COPY = {
   getting_started: {
     title: "Book your free setup call",
-    body: "A free call with the founder of Gondal Tech. We set up your first form with you and talk through your booking funnel.",
+    body: "A free setup call with the founder. We set up your first form with you and talk through your booking funnel.",
     cta: "Book a setup call"
   },
   first_form_live: {
     title: "Want a second pair of eyes on your funnel?",
-    body: "Book a free call with the founder of Gondal Tech to go through your form, your calendar and your follow-up.",
+    body: "Book a free setup call with the founder to go through your form, your calendar and your follow-up.",
     cta: "Book a free call"
   },
   dismiss: "Not now",

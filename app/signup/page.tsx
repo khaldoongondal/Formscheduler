@@ -49,7 +49,7 @@ export default async function SignupPage() {
           </div>
           <CardTitle>Create your free FormBook account</CardTitle>
           <p className="text-sm text-slate-500">
-            FormBook is a tool from Gondal Tech. The free {PLANS.free.name} plan includes {PLANS.free.maxActiveForms} active forms.
+            The free {PLANS.free.name} plan includes {PLANS.free.maxActiveForms} active forms.
           </p>
         </CardHeader>
         <CardContent>

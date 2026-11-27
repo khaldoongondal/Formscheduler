@@ -7,6 +7,7 @@
  */
 
 import { CONTACT_EMAIL, PLANS, formatPlanPrice, type PlanDefinition, type PlanId } from "@/lib/billing/plans";
+import { MAKER_FOOTER_LINE } from "@/lib/marketing/site";
 
 export type PublicProofEntry = { value: string; context: string };
 
@@ -22,7 +23,7 @@ export const PUBLIC_PROOF: {
 } = { leadToBookingRate: null, eventMatchQuality: null };
 
 export const HOME_COPY = {
-  eyebrow: "FormBook, a tool from Gondal Tech",
+  eyebrow: "For call-booking funnels",
   headline: "Qualify, book and measure every lead in one form.",
   subhead:
     "FormBook is for founders and business owners who run call-booking funnels. It asks your questions, books the call in your calendar, sends the lead to your CRM, and shows you how many of your leads go on to book.",
@@ -30,7 +31,6 @@ export const HOME_COPY = {
   secondaryCta: { label: "Sign in", href: "/login" },
   videoCta: "Watch the walkthrough",
   brandName: "FormBook",
-  brandBy: "by Gondal Tech",
   metricsTitle: "Two numbers FormBook helps you watch",
   metrics: [
     {
@@ -67,7 +67,7 @@ export const HOME_COPY = {
   plansNote: "Prices in US dollars.",
   freeCardCta: "Create a free account",
   scalingCardCta: "Start free, upgrade any time",
-  setupCallLine: "Every account can book a free setup call with the founder of Gondal Tech.",
+  setupCallLine: "Every account can book a free setup call with the founder.",
   setupCallLink: "Book a setup call",
   faqTitle: "Questions",
   finalCtaTitle: "Ready to try it?",
@@ -81,7 +81,7 @@ export const HOME_COPY = {
     { label: "Create an account", href: "/signup" }
   ] as const,
   footerContact: "Contact:",
-  footerLine: "FormBook is a tool from Gondal Tech.",
+  footerLine: MAKER_FOOTER_LINE,
   skipLink: "Skip to content"
 } as const;
 
@@ -179,8 +179,8 @@ export function homeFaq(
         "No. Meta events are optional. If you add a pixel, you paste your own pixel ID and access token, and you decide which events are sent."
     },
     {
-      question: "Who makes FormBook?",
-      answer: `Gondal Tech. Email ${contactEmail} with any question.`
+      question: "How do I get in touch?",
+      answer: `Email ${contactEmail} with any question.`
     },
     {
       question: `How do I cancel ${s.name}?`,

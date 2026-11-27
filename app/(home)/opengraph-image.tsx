@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "FormBook, a tool from Gondal Tech";
+export const alt = "FormBook: qualify, book and measure every lead in one form";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -29,7 +29,7 @@ export default function OpengraphImage() {
           <div style={{ marginTop: 24, fontSize: 44, color: "#334155", lineHeight: 1.25 }}>
             Qualify, book and measure every lead in one form.
           </div>
-          <div style={{ marginTop: 56, fontSize: 28, color: "#2bab80" }}>A tool from Gondal Tech</div>
+          <div style={{ marginTop: 56, fontSize: 28, color: "#2bab80" }}>Free plan available</div>
         </div>
       </div>
     ),

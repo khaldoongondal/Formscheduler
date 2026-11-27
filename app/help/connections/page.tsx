@@ -6,6 +6,7 @@ import {
   supportEmailFrom
 } from "@/lib/help/connections-copy";
 import { PROVIDERS } from "@/lib/connections/registry";
+import { MAKER_FOOTER_LINE } from "@/lib/marketing/site";
 
 export const metadata = {
   title: HELP_COPY.metaTitle,
@@ -31,7 +32,6 @@ export default function ConnectionsHelpPage() {
           <Link href="/" className="hover:underline">
             FormBook
           </Link>
-          , a tool from Gondal Tech
         </p>
         <h1 className="mt-2 text-3xl font-bold text-slate-900">{HELP_COPY.title}</h1>
         <p className="mt-2 text-sm text-slate-500">{HELP_COPY.subtitle}</p>
@@ -100,6 +100,7 @@ export default function ConnectionsHelpPage() {
             Data Processing Addendum
           </Link>
         </nav>
+        <p className="mt-4 text-xs text-slate-400">{MAKER_FOOTER_LINE}</p>
       </div>
     </main>
   );

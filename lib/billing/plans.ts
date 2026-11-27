@@ -20,8 +20,23 @@ export type PlanDefinition = {
   maxPixels: number;
 };
 
-/** The one owner contact address. Every message or page imports this constant. */
-export const CONTACT_EMAIL = "khaldoon@gondaltech.com";
+/** Used only when FORMBOOK_SUPPORT_EMAIL is unset or not an email address. */
+export const FALLBACK_CONTACT_EMAIL = "khaldoon@gondaltech.com";
+
+const CONTACT_EMAIL_PATTERN = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+
+/** FORMBOOK_SUPPORT_EMAIL when it is a valid email address, otherwise FALLBACK_CONTACT_EMAIL. */
+export function contactEmailFrom(raw: string | undefined | null): string {
+  const value = raw?.trim() ?? "";
+  return value && value.length <= 254 && CONTACT_EMAIL_PATTERN.test(value) ? value : FALLBACK_CONTACT_EMAIL;
+}
+
+/**
+ * The one public contact address. Every message or page imports this constant.
+ * Set FORMBOOK_SUPPORT_EMAIL to change it without a code change (read when the
+ * server starts or the page is built, so redeploy after changing it).
+ */
+export const CONTACT_EMAIL = contactEmailFrom(process.env.FORMBOOK_SUPPORT_EMAIL);
 
 /**
  * Must equal the seed in supabase/migrations/0020_plans_and_form_limits.sql

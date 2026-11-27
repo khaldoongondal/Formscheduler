@@ -1,12 +1,12 @@
 # FormBook production deployment
 
-FormBook is a tool from Gondal Tech. Production address after the move: `https://formbooking.gondaltech.app` (old address `https://app.formbook.ca` keeps serving during the switch).
+FormBook is made by Gondal Tech. Main production address: `https://app.formbook.ca`. `https://formbooking.gondaltech.app` is only an optional extra address: if it is attached, list it in `FORMBOOK_EXTRA_APP_ORIGINS` and in the redirect allow lists below.
 
 Pushing `main` deploys production on Vercel. Production has no staging copy, so follow the checklist below in order and do not skip the backup.
 
 ## Sprint 4 release checklist
 
-Sprint 4 adds the Plan page and upgrade path (checkout and billing on a Gondal Tech GoHighLevel payment page, never in the app), the downgrade freeze and restore, plan history, the onboarding checklist, starter templates and in-editor preview, account lifecycle events sent to the owner's GoHighLevel account, the owner activation funnel, and the new public product page with SEO metadata. Follow the steps in order.
+Sprint 4 adds the Plan page and upgrade path (checkout and billing on a GoHighLevel payment page in the owner's account, never in the app), the downgrade freeze and restore, plan history, the onboarding checklist, starter templates and in-editor preview, account lifecycle events sent to the owner's GoHighLevel account, the owner activation funnel, and the new public product page with SEO metadata. Follow the steps in order.
 
 ### 1. Prerequisite
 
@@ -125,19 +125,19 @@ where indexname in ('booking_attempts_connection_pending_slot_uidx', 'booking_at
 ### 3. Vercel production environment variables
 
 - `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` from step 4. Until both are set, the Connect Google Calendar button is hidden.
-- `FORMBOOK_EXTRA_APP_ORIGINS=https://app.formbook.ca` while both addresses serve the app, so Google sign-ins can start from either.
-- `FORMBOOK_SUPPORT_EMAIL`: the contact address shown on `/help/connections` (the line is hidden when empty).
+- `FORMBOOK_EXTRA_APP_ORIGINS=https://formbooking.gondaltech.app` only if that optional extra address is attached, so Google sign-ins can start from either. Leave it empty otherwise.
+- `FORMBOOK_SUPPORT_EMAIL`: the public contact address. It replaces the built-in address on the product, legal, plan and signup pages and in account messages, and is shown on `/help/connections` (the line there is hidden when empty). Redeploy after changing it.
 - `NEXT_PUBLIC_APP_URL` must be the final https address before any customer connects Calendly: Calendly booking notifications are sent there. After a later address change, each Calendly connection needs `Set up confirmations` again.
 - `CRON_SECRET` (from Sprint 2) also protects `/api/cron/crm-events`. `LEADDER_TOKEN_ENCRYPTION_KEY` stays unchanged: every new token and secret is encrypted with it.
 
 ### 4. Google Cloud (owner, in person)
 
 1. Create a Google Cloud project for FormBook and enable the Google Calendar API.
-2. OAuth consent screen: user type External; app name FormBook; support email and developer contact: the owner's Gondal Tech address; home page, privacy policy and terms links on `https://formbooking.gondaltech.app` (`/`, `/privacy`, `/terms`); authorised domains `gondaltech.app`, plus `formbook.ca` during the switch.
+2. OAuth consent screen: user type External; app name FormBook; support email and developer contact: the owner's FormBook support address; home page, privacy policy and terms links on `https://app.formbook.ca` (`/`, `/privacy`, `/terms`); authorised domain `formbook.ca`, plus `gondaltech.app` only if the optional extra address is used.
 3. Scopes: `openid`, `email`, `https://www.googleapis.com/auth/calendar.freebusy`, `https://www.googleapis.com/auth/calendar.events.owned`. Write down the class Google shows for each scope (sensitive or restricted); FormBook assumes both calendar scopes are sensitive (unverified point U1).
 4. Credentials: OAuth client, type Web application, with these authorised redirect URIs:
-   - `https://formbooking.gondaltech.app/api/connect/google/callback`
    - `https://app.formbook.ca/api/connect/google/callback`
+   - `https://formbooking.gondaltech.app/api/connect/google/callback` (only if the optional extra address is used)
 5. While the app is in Testing, add the Google accounts that may connect as test users. In Testing, only those accounts can connect and Google may expire their access after 7 days (U6), so customers cannot rely on it yet.
 6. Submit for verification with this justification: "FormBook reads free and busy times to offer open meeting times on the customer's booking form and creates the booked meeting on the customer's own calendar." Attach a demo video showing: connecting Google Calendar, setting working hours, a booking on a form, and the event in Google Calendar. Verification can take weeks.
 
@@ -461,10 +461,10 @@ order by c.relname;
 ### 4. Supabase Auth settings
 
 - Authentication, Providers, Email: "Confirm email" **on**. If it is off, the fallback signup confirms the address immediately and skips verification.
-- URL configuration: Site URL `https://formbooking.gondaltech.app`.
+- URL configuration: Site URL `https://app.formbook.ca`.
 - Redirect allow list:
-  - `https://formbooking.gondaltech.app/auth/confirm`
-  - `https://app.formbook.ca/auth/confirm` (during the switch)
+  - `https://app.formbook.ca/auth/confirm`
+  - `https://formbooking.gondaltech.app/auth/confirm` (only if the optional extra address is used)
   - `http://localhost:3000/auth/confirm`
 
 ### 5. Vercel production environment variables
@@ -474,7 +474,7 @@ Set every variable in `.env.example`:
 | Variable | Production value |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | From the production Supabase project |
-| `NEXT_PUBLIC_APP_URL` | `https://formbooking.gondaltech.app` |
+| `NEXT_PUBLIC_APP_URL` | `https://app.formbook.ca` |
 | `LEADDER_TOKEN_ENCRYPTION_KEY` | Unchanged (changing it breaks stored GoHighLevel tokens) |
 | `LEADDER_PROVISION_SECRET` | Unchanged |
 | `GHL_OAUTH_CLIENT_ID`, `GHL_OAUTH_CLIENT_SECRET` | Unchanged |
@@ -508,12 +508,12 @@ Confirm `LEADDER_DEFAULT_TENANT_ID` and `LEADDER_DEMO_SLOT_MODE` are **not** set
 
 Send one sample payload to each trigger and map the fields before going live.
 
-### 7. Domain move
+### 7. Domains
 
-- Vercel: add `formbooking.gondaltech.app` to the project. Keep `app.formbook.ca` attached.
-- DNS for `gondaltech.app`: CNAME `formbooking` to the target Vercel shows (DNS only, not proxied).
-- Do **not** redirect `app.formbook.ca/embed/*`. Existing embed snippets check `event.origin` against the old address. Keep the old domain serving the same app until every live embed has been re-copied from the admin.
-- GoHighLevel marketplace app: add redirect URI `https://formbooking.gondaltech.app/api/connect/callback`. Keep the old one until the switch is done.
+- `app.formbook.ca` is the main address and stays attached in Vercel.
+- Optional extra address: add `formbooking.gondaltech.app` to the project and, in DNS for `gondaltech.app`, a CNAME `formbooking` to the target Vercel shows (DNS only, not proxied).
+- Do **not** redirect `app.formbook.ca/embed/*`. Existing embed snippets check `event.origin` against the address they were copied from. Keep every address that live embeds use serving the same app.
+- GoHighLevel marketplace app: keep redirect URI `https://app.formbook.ca/api/connect/callback`. Add `https://formbooking.gondaltech.app/api/connect/callback` only if the optional extra address is used.
 
 ### 8. Deploy
 

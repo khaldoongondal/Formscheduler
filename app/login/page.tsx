@@ -23,7 +23,6 @@ export default async function LoginPage({
             <Lock className="h-5 w-5" />
           </div>
           <CardTitle>Sign in to FormBook</CardTitle>
-          <p className="text-sm text-slate-500">A tool from Gondal Tech</p>
         </CardHeader>
         <CardContent>
           <form action={signIn} className="space-y-4">

@@ -4,11 +4,18 @@
 
 import type { Metadata } from "next";
 
-export const DEFAULT_APP_URL = "https://formbooking.gondaltech.app";
+export const DEFAULT_APP_URL = "https://app.formbook.ca";
+
+/**
+ * The only mention of the company outside the legal text: one small, quiet
+ * footer line on the public marketing, help and legal pages. Never on
+ * customer form pages.
+ */
+export const MAKER_FOOTER_LINE = "FormBook is made by Gondal Tech.";
 
 export const SITE_TITLE = "FormBook: qualify and book calls in one form";
 export const SITE_DESCRIPTION =
-  "FormBook, a tool from Gondal Tech, for founders and business owners who run call-booking funnels. Qualify leads, book calls, split test forms and send server-side Meta events.";
+  "FormBook is for founders and business owners who run call-booking funnels. Qualify leads, book calls, split test forms and send server-side Meta events.";
 
 /**
  * Home page metadata only (app/(home)/page.tsx). Never in the root layout:

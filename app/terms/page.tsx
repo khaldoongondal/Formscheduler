@@ -4,7 +4,7 @@ import { CONTACT_EMAIL, PLANS, formatPlanPrice } from "@/lib/billing/plans";
 
 export const metadata = {
   title: "Terms of Service",
-  description: "The terms for using FormBook, a tool from Gondal Tech."
+  description: "The terms for using FormBook."
 };
 
 const free = PLANS.free;
@@ -27,7 +27,8 @@ export default function TermsPage() {
     >
       <LegalSection title="1. Who we are">
         <p>
-          FormBook is a tool from Gondal Tech (&quot;Gondal Tech&quot;, &quot;we&quot;, &quot;us&quot;). It lets
+          FormBook is provided by Gondal Tech (&quot;Gondal Tech&quot;, &quot;we&quot;, &quot;us&quot;), which is the
+          party to these terms with you. It lets
           businesses build short qualifying forms and booking pages that save leads and book calls into the
           business&apos;s own GoHighLevel account. You can reach us at{" "}
           <a className="font-semibold underline underline-offset-2" href={`mailto:${CONTACT_EMAIL}`}>
@@ -56,7 +57,7 @@ export default function TermsPage() {
           ]}
         />
         <p>
-          The {scaling.name} plan is billed monthly through a Gondal Tech payment page. You can cancel from the Manage
+          The {scaling.name} plan is billed monthly through a secure payment page. You can cancel from the Manage
           billing link on your Plan page or by emailing us; your account then moves to the {free.name} plan at the end
           of the paid period. We may change plan limits or prices and will give you notice before a change affects
           your account. When your account moves to a plan with lower limits, nothing is deleted: forms and Meta pixels

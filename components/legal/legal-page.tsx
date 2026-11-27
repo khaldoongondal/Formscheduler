@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { CONTACT_EMAIL } from "@/lib/billing/plans";
 import { LEGAL_LAST_UPDATED, LEGAL_REVIEW_PENDING } from "@/lib/legal";
+import { MAKER_FOOTER_LINE } from "@/lib/marketing/site";
 
 /** Shared layout for /terms, /privacy and /dpa. */
 export function LegalPage({ title, intro, children }: { title: string; intro?: ReactNode; children: ReactNode }) {
@@ -12,14 +13,13 @@ export function LegalPage({ title, intro, children }: { title: string; intro?: R
           <Link href="/" className="hover:underline">
             FormBook
           </Link>
-          , a tool from Gondal Tech
         </p>
         <h1 className="mt-2 text-3xl font-bold text-slate-900">{title}</h1>
         <p className="mt-2 text-sm text-slate-500">Last updated: {LEGAL_LAST_UPDATED}</p>
 
         {LEGAL_REVIEW_PENDING ? (
           <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-            Draft for review by Gondal Tech. This page is not legal advice and may change before it is final.
+            Draft for review. This page is not legal advice and may change before it is final.
           </div>
         ) : null}
 
@@ -45,6 +45,7 @@ export function LegalPage({ title, intro, children }: { title: string; intro?: R
             Data Processing Addendum
           </Link>
         </nav>
+        <p className="mt-4 text-xs text-slate-400">{MAKER_FOOTER_LINE}</p>
       </div>
     </main>
   );

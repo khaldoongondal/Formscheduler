@@ -4,7 +4,7 @@ import { CONTACT_EMAIL } from "@/lib/billing/plans";
 
 export const metadata = {
   title: "Privacy Policy",
-  description: "How FormBook, a tool from Gondal Tech, handles personal data."
+  description: "How FormBook handles personal data."
 };
 
 export default function PrivacyPage() {
@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       title="Privacy Policy"
       intro={
         <p>
-          This policy explains how Gondal Tech handles personal data in FormBook. It covers two groups of people:
+          This policy explains how Gondal Tech, the company that provides FormBook, handles personal data in FormBook. It covers two groups of people:
           businesses that hold a FormBook account, and people who fill in a form that one of those businesses published.
         </p>
       }
