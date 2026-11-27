@@ -27,15 +27,15 @@ export const SPLIT_TEST_NAME_REQUIRED = "Give the test a name.";
 export const SPLIT_TEST_NAME_TOO_LONG = "Keep the name under 120 characters.";
 
 const optionalFormId = z
-  .union([z.string().uuid("Choose form C or leave it empty."), z.literal("")])
+  .union([z.string().guid("Choose form C or leave it empty."), z.literal("")])
   .optional();
 
 export const splitTestFormSchema = z
   .object({
     name: z.string().trim().min(1, SPLIT_TEST_NAME_REQUIRED).max(120, SPLIT_TEST_NAME_TOO_LONG),
     slug: z.string().trim().toLowerCase(),
-    form_a: z.string().uuid("Choose form A."),
-    form_b: z.string().uuid("Choose form B."),
+    form_a: z.string().guid("Choose form A."),
+    form_b: z.string().guid("Choose form B."),
     form_c: optionalFormId
   })
   .refine(

@@ -5,10 +5,20 @@ export function ok<T>(data: T, status = 200) {
   return NextResponse.json(data, { status });
 }
 
+function validationDetails(error: ZodError) {
+  return error.flatten((issue) => {
+    // Zod omits raw input from reported issues. Only translate its default missing-value message.
+    if (issue.code === "invalid_type" && issue.message === `Invalid input: expected ${issue.expected}, received undefined`) {
+      return "Required";
+    }
+    return issue.message;
+  });
+}
+
 /** Admin routes only: returns the error text as is. Public routes use failPublic. */
 export function fail(error: unknown, status = 400) {
   if (error instanceof ZodError) {
-    const flattened = error.flatten();
+    const flattened = validationDetails(error);
     const fieldMessage = Object.values(flattened.fieldErrors).flat().find(Boolean);
     const formMessage = flattened.formErrors.find(Boolean);
 
@@ -49,7 +59,7 @@ export const GENERIC_PUBLIC_ERROR = "Something went wrong. Please try again.";
  */
 export function failPublic(error: unknown) {
   if (error instanceof ZodError) {
-    const flattened = error.flatten();
+    const flattened = validationDetails(error);
     const fieldMessage = Object.values(flattened.fieldErrors).flat().find(Boolean);
     return NextResponse.json(
       { error: fieldMessage ?? "Please check your answers and try again." },

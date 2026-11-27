@@ -91,7 +91,7 @@ function isRealDate(value: string) {
 }
 
 const amountField = z
-  .string({ required_error: SPEND_MESSAGES.amount, invalid_type_error: SPEND_MESSAGES.amount })
+  .string(SPEND_MESSAGES.amount)
   .transform((value, context) => {
     const parsed = parseAmountToCents(value);
     if (!parsed.ok) {
@@ -102,8 +102,12 @@ const amountField = z
   });
 
 const currencyField = z.enum(CURRENCIES, {
-  errorMap: () => ({ message: SPEND_MESSAGES.currency })
+  error: SPEND_MESSAGES.currency
 });
+
+function periodDate(message: string) {
+  return z.string({ error: (issue) => issue.input === undefined ? message : undefined }).refine(isRealDate, message);
+}
 
 const noteField = z
   .string()
@@ -123,8 +127,8 @@ export const spendEntrySchema = z
   .object({
     amount: amountField,
     currency: currencyField,
-    period_start: z.string({ required_error: SPEND_MESSAGES.startDate }).refine(isRealDate, { message: SPEND_MESSAGES.startDate }),
-    period_end: z.string({ required_error: SPEND_MESSAGES.endDate }).refine(isRealDate, { message: SPEND_MESSAGES.endDate }),
+    period_start: periodDate(SPEND_MESSAGES.startDate),
+    period_end: periodDate(SPEND_MESSAGES.endDate),
     note: noteField
   })
   .refine((value) => value.period_end >= value.period_start, {

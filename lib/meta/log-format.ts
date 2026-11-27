@@ -279,7 +279,8 @@ export const LOG_EVENT_OPTIONS: ReadonlyArray<{ value: LogEventKey; label: strin
 function allOr(values: readonly string[]) {
   return z
     .unknown()
-    .transform((value) => (typeof value === "string" && values.includes(value.trim()) ? value.trim() : "all"));
+    .transform((value) => (typeof value === "string" && values.includes(value.trim()) ? value.trim() : "all"))
+    .default("all");
 }
 
 /**

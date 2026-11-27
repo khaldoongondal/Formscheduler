@@ -34,9 +34,7 @@ const TEST_COLUMNS = "id,tenant_id,name,slug,status,winner_funnel_id,started_at,
 /** Turns any thrown value into a user message (Zod, trigger errors, plan limits, else generic). */
 async function friendlyError(error: unknown, tenantId: string): Promise<Error> {
   if (error instanceof ZodError) {
-    const flattened = error.flatten();
-    const message =
-      Object.values(flattened.fieldErrors).flat().find(Boolean) ?? flattened.formErrors.find(Boolean);
+    const message = error.issues.find((issue) => issue.path.length > 0)?.message ?? error.issues[0]?.message;
     return new Error(message ?? "Please check the form and try again.");
   }
   const message = error instanceof Error ? error.message : String(error ?? "");

@@ -78,22 +78,26 @@ export function timeToMinutes(value: string): number | null {
 
 function intRange(min: number, max: number, message: string) {
   return z.coerce
-    .number({ invalid_type_error: message })
+    .number(message)
     .int({ message })
     .min(min, { message })
     .max(max, { message });
 }
 
+function requiredString(invalidTypeMessage: string) {
+  return z.string({ error: (issue) => issue.input === undefined ? "Required" : invalidTypeMessage });
+}
+
 const intervalSchema = z.object({
-  start: z.string({ invalid_type_error: AVAILABILITY_MESSAGES.timeFormat }),
-  end: z.string({ invalid_type_error: AVAILABILITY_MESSAGES.timeFormat })
+  start: requiredString(AVAILABILITY_MESSAGES.timeFormat),
+  end: requiredString(AVAILABILITY_MESSAGES.timeFormat)
 });
 
 const daySchema = z.array(intervalSchema).max(MAX_INTERVALS_PER_DAY, { message: AVAILABILITY_MESSAGES.tooMany });
 
 const rawSchema = z.object({
   version: z.literal(1).optional(),
-  timezone: z.string({ invalid_type_error: AVAILABILITY_MESSAGES.timezone }),
+  timezone: requiredString(AVAILABILITY_MESSAGES.timezone),
   weekly: z.object({
     mon: daySchema.default([]),
     tue: daySchema.default([]),
@@ -113,7 +117,7 @@ const rawSchema = z.object({
   max_days_ahead: intRange(1, MAX_DAYS_AHEAD, AVAILABILITY_MESSAGES.daysAhead)
 });
 
-export const availabilitySchema: z.ZodType<Availability, z.ZodTypeDef, unknown> = rawSchema
+export const availabilitySchema: z.ZodType<Availability> = rawSchema
   .superRefine((value, ctx) => {
     if (!isValidTimeZone(value.timezone)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["timezone"], message: AVAILABILITY_MESSAGES.timezone });

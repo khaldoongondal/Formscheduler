@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { databaseIdSchema } from "@/lib/validation/fields";
 
 export const PIXEL_MESSAGES = {
   name: "Give the pixel a name.",
@@ -83,7 +84,7 @@ export const funnelMetaSettingsSchema = z.object({
   meta_pixel_id: z
     .string()
     .trim()
-    .refine((value) => value === "" || z.string().uuid().safeParse(value).success, PIXEL_MESSAGES.foreignPixel)
+    .refine((value) => value === "" || databaseIdSchema.safeParse(value).success, PIXEL_MESSAGES.foreignPixel)
     .transform((value) => (value ? value : null)),
   consent_confirmed: z.boolean(),
   checkbox_enabled: z.boolean(),

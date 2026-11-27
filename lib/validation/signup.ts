@@ -47,7 +47,7 @@ export const signupSchema = z.object({
     // "https://" is added by the transform; the stored value must fit 300 characters.
     .refine((value) => value.length <= 300, "Use 300 characters or fewer."),
   company_fax: z.string().optional(),
-  terms: z.literal("on", { errorMap: () => ({ message: "Please accept the terms to continue." }) })
+  terms: z.literal("on", { error: "Please accept the terms to continue." })
 });
 
 export type SignupInput = z.infer<typeof signupSchema>;

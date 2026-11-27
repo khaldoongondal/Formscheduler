@@ -1,16 +1,17 @@
 import { z } from "zod";
+import { databaseIdSchema, urlStringSchema } from "@/lib/validation/fields";
 
 export const startLeadSessionSchema = z
   .object({
-    funnel_id: z.string().uuid(),
+    funnel_id: databaseIdSchema,
     first_name: z.string().max(80).optional().or(z.literal("")),
     last_name: z.string().max(80).optional().or(z.literal("")),
     full_name: z.string().max(160).optional().or(z.literal("")),
     email: z.string().email().optional().or(z.literal("")),
     phone: z.string().regex(/^\+\d{8,15}$/, "Please add a valid phone number.").optional().or(z.literal("")),
     visitor_id: z.string().min(8).max(128).optional(),
-    source_url: z.string().url().optional(),
-    referrer: z.string().url().optional(),
+    source_url: urlStringSchema.optional(),
+    referrer: urlStringSchema.optional(),
     utm_source: z.string().max(160).optional(),
     utm_medium: z.string().max(160).optional(),
     utm_campaign: z.string().max(160).optional(),
@@ -29,9 +30,9 @@ export const startLeadSessionSchema = z
     fingerprint: z.string().max(160).optional(),
     split_test_id: z.string().max(160).optional(),
     split_variant: z.string().max(80).optional(),
-    landing_page_url: z.string().url().optional(),
+    landing_page_url: urlStringSchema.optional(),
     /** Split test the page was served for; the server re-checks it (decision S9). */
-    test_id: z.string().uuid().optional(),
+    test_id: databaseIdSchema.optional(),
     /** The Meta consent checkbox on the form; only read when the form shows it. */
     meta_consent: z.boolean().optional(),
     /** First time this browser saw the fbclid (ms), for building fbc (decision M13). */
@@ -43,11 +44,11 @@ export const startLeadSessionSchema = z
   });
 
 export const answerInputSchema = z.object({
-  question_id: z.string().uuid(),
+  question_id: databaseIdSchema,
   value: z.union([z.string(), z.number(), z.array(z.string())])
 });
 
 export const submitAnswersSchema = z.object({
-  lead_session_id: z.string().uuid(),
+  lead_session_id: databaseIdSchema,
   answers: z.array(answerInputSchema).min(1)
 });

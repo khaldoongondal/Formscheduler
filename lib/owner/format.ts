@@ -8,9 +8,9 @@ import { PLANS, type PlanState } from "@/lib/billing/plans";
 
 export const OWNER_REASON_MAX = 500;
 
-export const ownerUuidSchema = z.string().trim().uuid("That record id is not valid.");
+export const ownerUuidSchema = z.string().trim().guid("That record id is not valid.");
 export const ownerPlanSchema = z.enum(["free", "scaling", "suspended"], {
-  errorMap: () => ({ message: "Choose a valid plan." })
+  error: "Choose a valid plan."
 });
 export const ownerOptionalReasonSchema = z
   .string()
@@ -24,7 +24,7 @@ export const ownerRequiredReasonSchema = z
   .min(1, "Enter a reason for the takedown.")
   .max(OWNER_REASON_MAX, `Keep the reason under ${OWNER_REASON_MAX} characters.`);
 export const ownerReportStatusSchema = z.enum(["actioned", "dismissed"], {
-  errorMap: () => ({ message: "Choose a valid report status." })
+  error: "Choose a valid report status."
 });
 export const ownerBadgeSchema = z.enum(["on", "off"]).transform((value) => value === "on");
 

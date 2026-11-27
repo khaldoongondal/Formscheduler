@@ -25,7 +25,7 @@ const idSchema = z
   .optional()
   .transform((value) => value ?? null);
 
-export const hubspotFormSettingsSchema: z.ZodType<HubspotFormSettings, z.ZodTypeDef, unknown> = z.object({
+export const hubspotFormSettingsSchema: z.ZodType<HubspotFormSettings> = z.object({
   deal_on_lead: z.boolean().optional().default(false),
   deal_on_booked: z.boolean().optional().default(false),
   pipeline_id: idSchema,

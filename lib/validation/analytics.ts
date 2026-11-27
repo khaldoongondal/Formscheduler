@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { databaseIdSchema, urlStringSchema } from "@/lib/validation/fields";
 
 /** Size caps for the free-form fields accepted by /api/analytics. Pure module. */
 export const ANALYTICS_METADATA_MAX_KEYS = 40;
@@ -24,7 +25,7 @@ const arrayValueSchema = z
   .max(ANALYTICS_METADATA_MAX_ARRAY_ITEMS);
 
 export const analyticsMetadataSchema = z
-  .record(z.union([primitiveValueSchema, arrayValueSchema]))
+  .record(z.string(), z.union([primitiveValueSchema, arrayValueSchema]))
   .superRefine((metadata, ctx) => {
     const keys = Object.keys(metadata);
     if (keys.length > ANALYTICS_METADATA_MAX_KEYS) {
@@ -53,14 +54,14 @@ export const analyticsMetadataSchema = z
   });
 
 export const analyticsEventSchema = z.object({
-  funnel_id: z.string().uuid(),
-  lead_session_id: z.string().uuid().optional(),
+  funnel_id: databaseIdSchema,
+  lead_session_id: databaseIdSchema.optional(),
   visitor_id: z.string().min(8).max(128).optional(),
   event_type: z.enum(["page_view", "step_view", "form_start"]),
   /** Split test the page was served for; the server re-checks it (decision S9). */
-  test_id: z.string().uuid().optional(),
+  test_id: databaseIdSchema.optional(),
   source: z.string().max(40).optional(),
-  source_url: z.string().url().max(2048).optional(),
+  source_url: urlStringSchema.max(2048).optional(),
   user_agent: z.string().max(512).optional(),
   metadata: analyticsMetadataSchema.optional()
 });

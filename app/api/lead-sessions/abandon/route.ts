@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { databaseIdSchema } from "@/lib/validation/fields";
 import { failPublic, ok } from "@/lib/api/responses";
 import { toAbandonResponse } from "@/lib/lead-sessions/public";
 import { abandonLeadSession } from "@/lib/lead-sessions/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 const abandonSchema = z.object({
-  lead_session_id: z.string().uuid()
+  lead_session_id: databaseIdSchema
 });
 
 export async function POST(request: NextRequest) {
