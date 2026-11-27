@@ -282,7 +282,8 @@ describe("holdConflict (overlapping and buffer-adjacent bookings)", () => {
 
   it("the generic path checks after its insert and before the provider call", () => {
     const text = source("lib", "bookings", "generic-path.ts");
-    const insertAt = text.indexOf('.from("booking_attempts")\n    .insert(');
+    // Line endings differ between checkouts, so match the two calls with a pattern.
+    const insertAt = text.search(/\.from\("booking_attempts"\)\s*\.insert\(/);
     const checkAt = text.indexOf("conflict = await findHoldConflict(");
     const bookAt = text.indexOf("resolved.provider.book(");
     assert.ok(insertAt > 0 && checkAt > insertAt && bookAt > checkAt);
