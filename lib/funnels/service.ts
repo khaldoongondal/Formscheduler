@@ -2,6 +2,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
 import { assertFormLimit, planLimitMessageForTenant } from "@/lib/billing/plan-service";
 import { parsePlanState, planLimitMessageFromError, shouldShowBadge } from "@/lib/billing/plans";
+import { QUESTION_NOT_FOUND_MESSAGE, questionUpdateFields } from "@/lib/funnels/question-scope";
 import { buildCopySlug, checkSlug } from "@/lib/funnels/slugs";
 import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
 import { EXTENSION_BY_MIME, sniffImageMime, type SniffedImage } from "@/lib/security/image-sniff";
@@ -631,40 +632,66 @@ export async function upsertQuestion(input: unknown) {
   return data;
 }
 
-export async function updateQuestion(input: unknown) {
+/** The caller's verified form. Every question and option write is limited to it. */
+export type FunnelScope = { funnelId: string; tenantId: string };
+
+export async function updateQuestion(input: unknown, scope: FunnelScope) {
   const parsed = updateQuestionSchema.parse(input);
-  const { id, ...payload } = parsed;
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("questions")
-    .update(payload)
-    .eq("id", id)
+    .update(questionUpdateFields(parsed))
+    .eq("id", parsed.id)
+    .eq("funnel_id", scope.funnelId)
+    .eq("tenant_id", scope.tenantId)
     .select("*")
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
+  if (!data) throw new Error(QUESTION_NOT_FOUND_MESSAGE);
   return data;
 }
 
-export async function deleteQuestion(id: string) {
+export async function deleteQuestion(id: string, scope: FunnelScope) {
   const supabase = createServiceClient();
-  const { error } = await supabase.from("questions").delete().eq("id", id);
+  const { error } = await supabase
+    .from("questions")
+    .delete()
+    .eq("id", id)
+    .eq("funnel_id", scope.funnelId)
+    .eq("tenant_id", scope.tenantId);
   if (error) throw new Error(error.message);
 }
 
-export async function updateQuestionOrder(input: unknown) {
+export async function updateQuestionOrder(input: unknown, scope: FunnelScope) {
   const parsed = updateQuestionOrderSchema.parse(input);
   const supabase = createServiceClient();
   const { error } = await supabase
     .from("questions")
     .update({ display_order: parsed.display_order })
-    .eq("id", parsed.question_id);
+    .eq("id", parsed.question_id)
+    .eq("funnel_id", scope.funnelId)
+    .eq("tenant_id", scope.tenantId);
 
   if (error) throw new Error(error.message);
 }
 
-export async function upsertQuestionOption(input: unknown) {
-  const parsed = questionOptionSchema.parse(input);
+async function assertQuestionBelongsToFunnel(questionId: string, scope: FunnelScope) {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("questions")
+    .select("id")
+    .eq("id", questionId)
+    .eq("funnel_id", scope.funnelId)
+    .eq("tenant_id", scope.tenantId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(QUESTION_NOT_FOUND_MESSAGE);
+}
+
+export async function upsertQuestionOption(input: unknown, scope: FunnelScope) {
+  const parsed = { ...questionOptionSchema.parse(input), tenant_id: scope.tenantId };
+  await assertQuestionBelongsToFunnel(parsed.question_id, scope);
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("question_options")
@@ -676,9 +703,15 @@ export async function upsertQuestionOption(input: unknown) {
   return data;
 }
 
-export async function deleteQuestionOption(id: string) {
+export async function deleteQuestionOption(id: string, questionId: string, scope: FunnelScope) {
+  await assertQuestionBelongsToFunnel(questionId, scope);
   const supabase = createServiceClient();
-  const { error } = await supabase.from("question_options").delete().eq("id", id);
+  const { error } = await supabase
+    .from("question_options")
+    .delete()
+    .eq("id", id)
+    .eq("question_id", questionId)
+    .eq("tenant_id", scope.tenantId);
   if (error) throw new Error(error.message);
 }
 

@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     const funnel = await assertFunnelServesPublic(parsed.funnel_id);
 
     // Daily caps per form and tenant. The client ignores the response.
-    if (!(await enforceDailyCap("analytics", { funnelId: funnel.id, tenantId: funnel.tenant_id }))) {
+    if (!(await enforceDailyCap("analytics", { funnelId: funnel.id, tenantId: funnel.tenant_id, headers: request.headers }))) {
       return ok({ tracked: false }, 202);
     }
 

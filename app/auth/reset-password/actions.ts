@@ -3,8 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { findUserIdByEmail } from "@/lib/auth/users";
-import { hashSubject } from "@/lib/security/rate-limit-core";
-import { checkActionRateLimit, getIpHashSalt, hitRateLimit } from "@/lib/security/rate-limit";
+import { allowEmailSend, checkActionRateLimit } from "@/lib/security/rate-limit";
 import { postGhlWebhook } from "@/lib/signup/ghl-webhook";
 import { createAuthServerClient } from "@/lib/supabase/auth";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -78,15 +77,9 @@ export async function requestPasswordReset(formData: FormData) {
     redirect(`/auth/reset-password?error=${encodeURIComponent(RESET_RATE_LIMITED_MESSAGE)}`);
   }
 
-  // Per address as well, so one inbox cannot be flooded from many IPs.
-  const perEmail = await hitRateLimit({
-    scope: "password-reset-email",
-    subject: hashSubject(email, getIpHashSalt()),
-    limit: 3,
-    windowSeconds: 3600
-  });
-
-  if (perEmail.allowed) {
+  // Per address as well: a short send cooldown, so one inbox cannot be flooded
+  // from many IPs, but nobody can block a real reset for more than a few minutes.
+  if (await allowEmailSend("password-reset-email", email)) {
     const webhookUrl = process.env.FORMBOOK_GHL_PASSWORD_RESET_WEBHOOK_URL?.trim();
     try {
       if (webhookUrl) {

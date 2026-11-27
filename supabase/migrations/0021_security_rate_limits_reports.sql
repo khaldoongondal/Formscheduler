@@ -73,14 +73,25 @@ before insert or update of is_published, taken_down_at on public.funnels
 for each row execute function public.block_publish_when_taken_down();
 
 -- A form may only use a GoHighLevel connection from its own tenant.
--- Data fix: clear cross-tenant references (a security bug). Rows stay valid.
-update public.funnels f
-set ghl_connection_id = null
-where f.ghl_connection_id is not null
-  and not exists (
-    select 1 from public.ghl_connections c
-    where c.id = f.ghl_connection_id and c.tenant_id = f.tenant_id
-  );
+-- Existing rows are never changed silently: if any form points at another
+-- tenant's connection, stop here and list them, so the owner can fix each one
+-- by hand (see docs/production-deployment.md) before running this file again.
+do $$
+declare
+  v_ids text;
+begin
+  select string_agg(f.id::text, ', ' order by f.id) into v_ids
+  from public.funnels f
+  where f.ghl_connection_id is not null
+    and not exists (
+      select 1 from public.ghl_connections c
+      where c.id = f.ghl_connection_id and c.tenant_id = f.tenant_id
+    );
+  if v_ids is not null then
+    raise exception 'FORMBOOK_MIGRATION: these forms use a GoHighLevel connection from another tenant: %. Fix them by hand, then run this file again.', v_ids
+      using errcode = 'P0001';
+  end if;
+end $$;
 
 create or replace function public.enforce_funnel_connection_tenant()
 returns trigger

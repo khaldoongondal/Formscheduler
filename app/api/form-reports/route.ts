@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (funnelError) throw new Error(funnelError.message);
 
-    if (funnel && !(await enforceDailyCap("report", { funnelId: funnel.id }))) {
+    if (funnel && !(await enforceDailyCap("report", { funnelId: funnel.id, headers: request.headers }))) {
       // Enough reports for this form today; answer the same way without storing.
       return ok({ received: true }, 201);
     }

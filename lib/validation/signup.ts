@@ -38,17 +38,16 @@ export const signupSchema = z.object({
     .transform(normalizeWebsiteValue)
     // "https://" is added by the transform; the stored value must fit 300 characters.
     .refine((value) => value.length <= 300, "Use 300 characters or fewer."),
-  password: z.string().min(8, "Use at least 8 characters.").max(72, "Use 72 characters or fewer."),
   company_fax: z.string().optional(),
   terms: z.literal("on", { errorMap: () => ({ message: "Please accept the terms to continue." }) })
 });
 
 export type SignupInput = z.infer<typeof signupSchema>;
 
-export type SignupField = "name" | "email" | "phone" | "business_name" | "website" | "password" | "terms";
+export type SignupField = "name" | "email" | "phone" | "business_name" | "website" | "terms";
 export type SignupFieldErrors = Partial<Record<SignupField | "form", string>>;
 
-const SIGNUP_FIELDS: readonly SignupField[] = ["name", "email", "phone", "business_name", "website", "password", "terms"];
+const SIGNUP_FIELDS: readonly SignupField[] = ["name", "email", "phone", "business_name", "website", "terms"];
 
 export function parseSignupForm(
   values: Record<string, string>
@@ -64,7 +63,6 @@ export function parseSignupForm(
     phone: values.phone ?? "",
     business_name: values.business_name ?? "",
     website: values.website ?? "",
-    password: values.password ?? "",
     company_fax: values.company_fax ?? "",
     terms: values.terms
   });
@@ -112,9 +110,50 @@ export function buildSignupWebhookPayload(input: SignupProfile, verifyLink: stri
 
 export const SIGNUP_NEXT_PATH = "/admin/welcome";
 
+/**
+ * Where a verified signup goes: choose a password first, then the welcome
+ * page. The password is never taken from the unauthenticated signup form, so
+ * nobody can pre-register someone else's address with a password they know.
+ */
+export const SIGNUP_VERIFY_NEXT = `/auth/set-password?next=${SIGNUP_NEXT_PATH}`;
+
 export function buildVerifyLink(appUrl: string, hashedToken: string, verificationType: string): string {
   const base = appUrl.replace(/\/+$/, "");
-  return `${base}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${encodeURIComponent(verificationType)}&next=${SIGNUP_NEXT_PATH}`;
+  return `${base}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${encodeURIComponent(verificationType)}&next=${encodeURIComponent(SIGNUP_VERIFY_NEXT)}`;
+}
+
+/** Redirect target for /auth/confirm when Supabase sends the email itself. */
+export function buildSignupEmailRedirect(appUrl: string): string {
+  const base = appUrl.replace(/\/+$/, "");
+  return `${base}/auth/confirm?next=${encodeURIComponent(SIGNUP_VERIFY_NEXT)}`;
+}
+
+const SET_PASSWORD_PATH = "/auth/set-password";
+const SET_PASSWORD_NEXT_PATHS = new Set(["/admin/funnels", SIGNUP_NEXT_PATH]);
+const CONFIRM_NEXT_PATHS = new Set([SET_PASSWORD_PATH, "/admin/funnels", SIGNUP_NEXT_PATH]);
+
+/** Where /auth/set-password sends the user after saving. Allowlist only. */
+export function resolveSetPasswordNext(value: unknown): string {
+  return typeof value === "string" && SET_PASSWORD_NEXT_PATHS.has(value) ? value : "/admin/funnels";
+}
+
+/**
+ * Where /auth/confirm redirects after a valid link. Allowlist only: a bare
+ * allowed path, or /auth/set-password carrying an allowed `next`.
+ */
+export function resolveConfirmNext(value: string | null): { pathname: string; search: string } {
+  const fallback = { pathname: SET_PASSWORD_PATH, search: "" };
+  if (!value) return fallback;
+  if (CONFIRM_NEXT_PATHS.has(value)) return { pathname: value, search: "" };
+
+  const [pathname, query, ...rest] = value.split("?");
+  if (pathname !== SET_PASSWORD_PATH || rest.length > 0 || query === undefined) return fallback;
+  const params = new URLSearchParams(query);
+  const keys = Array.from(params.keys());
+  if (keys.length !== 1 || keys[0] !== "next") return fallback;
+  const next = params.get("next");
+  if (!next || !SET_PASSWORD_NEXT_PATHS.has(next)) return fallback;
+  return { pathname: SET_PASSWORD_PATH, search: `?next=${encodeURIComponent(next)}` };
 }
 
 /** Same link shape for password resets, always landing on /auth/set-password. */

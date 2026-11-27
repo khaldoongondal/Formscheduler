@@ -15,13 +15,22 @@ Pushing `main` deploys production on Vercel. Production has no staging copy, so 
 select version, name from supabase_migrations.schema_migrations order by version;
 ```
 
-- Do **not** re-apply old files. Only the four new files below are applied in this release.
+- Do **not** re-apply old files. Only the five new files below are applied in this release.
 
 ### 2. Pause provisioning
 
 Pause the GoHighLevel workflow that calls `/api/provision` until the deploy is done.
 
 ### 3. Apply the new migrations in order
+
+Before anything else, run this read-only check. It lists forms linked to a GoHighLevel connection that belongs to a different tenant. `0021` stops with an error naming these forms rather than unlinking them, so fix each one by hand first (point it at a connection from its own tenant, or set `ghl_connection_id` to null on purpose) and note the old value:
+
+```sql
+select f.id as funnel_id, f.tenant_id as funnel_tenant, f.ghl_connection_id, c.tenant_id as connection_tenant
+from public.funnels f
+join public.ghl_connections c on c.id = f.ghl_connection_id
+where c.tenant_id <> f.tenant_id;
+```
 
 Run each file in the Supabase SQL editor, in this order. Each one is safe to run twice. Run the verification query after each file before moving on.
 
@@ -70,7 +79,29 @@ where table_schema = 'public' and table_name = 'tenants'
 select count(*) from public.owner_list_clients();
 ```
 
-After all four, check function grants and RLS:
+5. `supabase/migrations/0024_close_direct_writes.sql`
+
+```sql
+-- Expect every column false: the API roles can no longer write tenant tables.
+select t as table_name,
+  has_table_privilege('authenticated', 'public.' || t, 'UPDATE') as authenticated_update,
+  has_table_privilege('authenticated', 'public.' || t, 'INSERT') as authenticated_insert,
+  has_table_privilege('anon', 'public.' || t, 'UPDATE') as anon_update
+from unnest(array['tenants', 'tenant_members', 'ghl_connections', 'funnels', 'questions', 'question_options',
+  'lead_sessions', 'lead_status_history', 'lead_answers', 'booking_attempts', 'analytics_events']) as t;
+-- Expect no rows: only select policies remain on the tenant tables.
+select tablename, policyname, cmd from pg_policies
+where schemaname = 'public' and cmd <> 'SELECT'
+  and tablename in ('tenants', 'tenant_members', 'ghl_connections', 'funnels', 'questions', 'question_options',
+    'lead_sessions', 'lead_status_history', 'lead_answers', 'booking_attempts', 'analytics_events');
+-- As the authenticated role, a plan change must fail with "permission denied".
+begin;
+set local role authenticated;
+update public.tenants set plan = 'scaling' where false;
+rollback;
+```
+
+After all five, check function grants and RLS:
 
 ```sql
 -- Every new function: anon and authenticated false, service_role true.
@@ -81,7 +112,7 @@ select p.proname,
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
-  and p.proname in ('rate_limit_hit', 'get_auth_user_id_by_email', 'is_auth_user_confirmed',
+  and p.proname in ('rate_limit_hit', 'rate_limit_hit_capped', 'get_auth_user_id_by_email', 'is_auth_user_confirmed',
                     'complete_signup', 'owner_list_clients')
 order by p.proname;
 
@@ -120,7 +151,7 @@ Set every variable in `.env.example`:
 | `FORMBOOK_GHL_SIGNUP_WEBHOOK_URL` | Inbound webhook URL from step 6 |
 | `FORMBOOK_GHL_PASSWORD_RESET_WEBHOOK_URL` | Inbound webhook URL from step 6 |
 | `FORMBOOK_SETUP_CALL_URL` | The owner's booking link for the free setup call |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | From Cloudflare Turnstile (add both hostnames to the widget) |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | **Required.** From Cloudflare Turnstile (add both hostnames to the widget). Without both, `/signup` refuses new accounts in production and logs an error. Preview deployments need them too (Cloudflare publishes test keys that always pass). |
 
 Confirm `LEADDER_DEFAULT_TENANT_ID` and `LEADDER_DEMO_SLOT_MODE` are **not** set in production. `LEADDER_DEFAULT_TENANT_ID` also turns on the local owner bypass outside production.
 
@@ -134,7 +165,7 @@ Confirm `LEADDER_DEFAULT_TENANT_ID` and `LEADDER_DEMO_SLOT_MODE` are **not** set
 - Add tag `formbook-signup`.
 - Send an email from the owner's address with a button linking to `{{inboundWebhookRequest.verify_link}}`.
   - Subject: `Verify your FormBook account`
-  - Body: `Hi {{name}}, click the button below to verify your email and open your FormBook account. The link works once.`
+  - Body: `Hi {{name}}, click the button below to verify your email and choose your FormBook password. The link works once.`
 
 **FormBook password reset**
 
@@ -161,7 +192,7 @@ Deploy only after steps 3 to 7 are done. Then re-enable the provisioning workflo
 Use a fresh email address:
 
 1. Sign up at `/signup`; the verification email arrives from GoHighLevel.
-2. Open the link; you land on `/admin/welcome`. This also confirms that `generateLink({ type: "magiclink" })` for an unconfirmed user produced a working verification link and set `email_confirmed_at`.
+2. Open the link; you land on `/auth/set-password`. Choose a password and you reach `/admin/welcome`. This also confirms that `generateLink({ type: "magiclink" })` for an unconfirmed user produced a working verification link and set `email_confirmed_at`.
 3. Create a form and activate it.
 4. From another browser, open the form and use "Report this form".
 5. As the owner, see the report in `/admin/clients`, take the form down, then restore it.

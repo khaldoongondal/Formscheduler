@@ -14,12 +14,13 @@ function checkEmailUrl(email: string, extra: Record<string, string>) {
 export async function resendVerificationAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase().slice(0, 254);
 
-  if (!(await checkActionRateLimit(await headers(), "signup"))) {
+  if (!(await checkActionRateLimit(await headers(), "signup-resend"))) {
     redirect(checkEmailUrl(email, { error: RESEND_RATE_LIMITED_MESSAGE }));
   }
 
   if (email.includes("@")) {
-    // Resolves without revealing whether an account is waiting.
+    // Resolves without revealing whether an account is waiting. The service also
+    // applies a per-address cooldown, so many IPs cannot flood one inbox.
     await resendVerification(email);
   }
 

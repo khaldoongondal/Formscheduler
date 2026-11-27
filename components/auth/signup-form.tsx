@@ -41,7 +41,7 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) 
   }, [state, turnstileSiteKey]);
 
   const textField = (
-    field: Exclude<SignupField, "password" | "terms">,
+    field: Exclude<SignupField, "terms">,
     label: string,
     props: InputHTMLAttributes<HTMLInputElement>
   ) => {
@@ -72,24 +72,9 @@ export function SignupForm({ turnstileSiteKey }: { turnstileSiteKey?: string }) 
       {textField("business_name", "Business name", { autoComplete: "organization", maxLength: 160 })}
       {textField("website", "Website", { autoComplete: "url", inputMode: "url", maxLength: 300, placeholder: "company.com" })}
 
-      <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          minLength={8}
-          maxLength={72}
-          required
-          aria-invalid={errors.password ? true : undefined}
-          aria-describedby="password-help"
-        />
-        <p id="password-help" className="text-xs text-slate-500">
-          At least 8 characters.
-        </p>
-        <FieldError id="password-error" message={errors.password} />
-      </div>
+      <p className="text-xs text-slate-500">
+        We will email you a link to confirm your address. You choose your password after you open it.
+      </p>
 
       {/* Honeypot: hidden from people, often filled by bots. */}
       <div aria-hidden="true" className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">

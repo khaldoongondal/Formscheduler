@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getClientIp } from "@/lib/security/client-ip";
-import { DAILY_CAPS, IP_LIMITS, type IpLimitScope } from "@/lib/security/limits";
+import { DAILY_CAPS, EMAIL_SEND_COOLDOWNS, IP_LIMITS, type EmailSendScope, type IpLimitScope } from "@/lib/security/limits";
 import {
   buildBucketKey,
+  buildDailyCapChecks,
   hashSubject,
   isOverLimit,
+  runCapChecks,
   utcDayStartSeconds,
   windowResetSeconds,
   windowStartSeconds
@@ -89,38 +91,99 @@ export async function checkActionRateLimit(headers: Headers, scope: IpLimitScope
   return result.allowed;
 }
 
+/**
+ * Like hitRateLimit, but only adds the hit while under the limit (RPC
+ * rate_limit_hit_capped, migration 0024), so refused requests do not count.
+ * Falls back to the counting RPC if 0024 is not applied yet.
+ */
+export async function hitCappedLimit(opts: {
+  scope: string;
+  subject: string;
+  limit: number;
+  windowSeconds: number;
+  nowMs?: number;
+}): Promise<{ allowed: boolean }> {
+  const nowMs = opts.nowMs ?? Date.now();
+  const bucketKey = buildBucketKey(opts.scope, opts.subject, windowStartSeconds(nowMs, opts.windowSeconds));
+
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.rpc("rate_limit_hit_capped", {
+      p_bucket_key: bucketKey,
+      p_window_seconds: opts.windowSeconds,
+      p_limit: opts.limit
+    });
+    if (!error && typeof data === "boolean") return { allowed: data };
+    console.error("rate_limit_hit_capped failed", opts.scope);
+  } catch {
+    console.error("rate_limit_hit_capped failed", opts.scope);
+  }
+  return hitRateLimit(opts);
+}
+
+/**
+ * Per-address cooldown for outgoing emails (verification, password reset).
+ * Returns true when an email may be sent to this address now.
+ */
+export async function allowEmailSend(scope: EmailSendScope, email: string): Promise<boolean> {
+  const { limit, windowSeconds } = EMAIL_SEND_COOLDOWNS[scope];
+  const result = await hitCappedLimit({
+    scope,
+    subject: hashSubject(email.trim().toLowerCase(), getIpHashSalt()),
+    limit,
+    windowSeconds
+  });
+  return result.allowed;
+}
+
 const DAILY_CAP_CONFIG = {
-  lead: { scope: "cap-lead", perForm: DAILY_CAPS.leadSessionsPerForm, perTenant: DAILY_CAPS.leadSessionsPerTenant },
-  analytics: { scope: "cap-analytics", perForm: DAILY_CAPS.analyticsPerForm, perTenant: DAILY_CAPS.analyticsPerTenant },
-  report: { scope: "cap-report", perForm: DAILY_CAPS.reportsPerForm, perTenant: null }
+  lead: {
+    scope: "cap-lead",
+    perIpPerForm: DAILY_CAPS.leadSessionsPerIpPerForm,
+    perForm: DAILY_CAPS.leadSessionsPerForm,
+    perTenant: DAILY_CAPS.leadSessionsPerTenant
+  },
+  analytics: {
+    scope: "cap-analytics",
+    perIpPerForm: DAILY_CAPS.analyticsPerIpPerForm,
+    perForm: DAILY_CAPS.analyticsPerForm,
+    perTenant: DAILY_CAPS.analyticsPerTenant
+  },
+  report: {
+    scope: "cap-report",
+    perIpPerForm: DAILY_CAPS.reportsPerIpPerForm,
+    perForm: DAILY_CAPS.reportsPerForm,
+    perTenant: null
+  }
 } as const;
 
-/** Daily caps per form and per tenant (UTC day). Returns true when allowed. */
+/**
+ * Daily caps (UTC day): per IP and form, then per form, then per tenant.
+ * Checks stop at the first block, and the shared form and tenant counters
+ * only count requests that are allowed. Returns true when allowed.
+ */
 export async function enforceDailyCap(
   kind: "lead" | "analytics" | "report",
-  ids: { funnelId: string; tenantId?: string }
+  ids: { funnelId: string; tenantId?: string; headers?: Headers }
 ): Promise<boolean> {
   const config = DAILY_CAP_CONFIG[kind];
-  const nowMs = Date.now();
   // The UTC day start is part of the key, so each day starts from zero.
-  const dayStart = utcDayStartSeconds(nowMs);
+  const dayStartMs = utcDayStartSeconds(Date.now()) * 1000;
   const windowSeconds = 86400;
 
-  const checks: Array<Promise<{ allowed: boolean }>> = [
-    hitRateLimit({ scope: config.scope, subject: `form-${ids.funnelId}`, limit: config.perForm, windowSeconds, nowMs: dayStart * 1000 })
-  ];
-  if (ids.tenantId && config.perTenant !== null) {
-    checks.push(
-      hitRateLimit({
-        scope: config.scope,
-        subject: `tenant-${ids.tenantId}`,
-        limit: config.perTenant,
-        windowSeconds,
-        nowMs: dayStart * 1000
-      })
-    );
-  }
+  const checks = buildDailyCapChecks({
+    scope: config.scope,
+    funnelId: ids.funnelId,
+    tenantId: ids.tenantId,
+    ipHash: ids.headers ? getHashedClientIp(ids.headers) : undefined,
+    perIpPerForm: config.perIpPerForm,
+    perForm: config.perForm,
+    perTenant: config.perTenant
+  });
 
-  const results = await Promise.all(checks);
-  return results.every((result) => result.allowed);
+  return runCapChecks(checks, async (check) => {
+    const args = { scope: check.scope, subject: check.subject, limit: check.limit, windowSeconds, nowMs: dayStartMs };
+    const result = check.mode === "capped" ? await hitCappedLimit(args) : await hitRateLimit(args);
+    return result.allowed;
+  });
 }

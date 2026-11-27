@@ -1,5 +1,6 @@
 import { findUserIdByEmail } from "@/lib/auth/users";
-import type { PlanState } from "@/lib/billing/plans";
+import { parsePlanState, type PlanState } from "@/lib/billing/plans";
+import { resolveProvisionPlanChange } from "@/lib/provisioning/plan-change";
 import { randomSuffix } from "@/lib/security/random";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Tenant } from "@/lib/types/database";
@@ -111,13 +112,39 @@ export async function provisionTenant(input: {
 
   if (existingMember?.tenant_id) {
     // Repeat call for an existing customer: treat it as a plan change
-    // (upgrade/downgrade from the sales-side automation).
+    // (upgrade, downgrade, lapse or renewal from the sales-side automation),
+    // keeping the suspension fields in step with the plan.
+    let resultingPlan: PlanState = plan;
     if (input.plan) {
-      const { error: planError } = await supabase
+      const { data: current, error: currentError } = await supabase
         .from("tenants")
-        .update({ plan })
-        .eq("id", existingMember.tenant_id);
-      if (planError) throw new Error(planError.message);
+        .select("plan,plan_before_suspension,suspended_at,suspension_reason")
+        .eq("id", existingMember.tenant_id)
+        .maybeSingle();
+      if (currentError) throw new Error(currentError.message);
+      if (!current) throw new Error("Tenant not found.");
+
+      const change = resolveProvisionPlanChange(
+        {
+          plan: parsePlanState(current.plan),
+          plan_before_suspension: current.plan_before_suspension ?? null,
+          suspended_at: current.suspended_at ?? null,
+          suspension_reason: current.suspension_reason ?? null
+        },
+        plan,
+        new Date().toISOString()
+      );
+      if (change.keptOwnerSuspension) {
+        console.info("[provision] plan change kept an owner suspension in place");
+      }
+      if (change.update) {
+        const { error: planError } = await supabase
+          .from("tenants")
+          .update(change.update)
+          .eq("id", existingMember.tenant_id);
+        if (planError) throw new Error(planError.message);
+      }
+      resultingPlan = change.resultingPlan;
     }
 
     return {
@@ -125,7 +152,7 @@ export async function provisionTenant(input: {
       user_id: userId,
       user_created: userCreated,
       tenant_created: false,
-      plan,
+      plan: resultingPlan,
       login_link: loginLink
     };
   }

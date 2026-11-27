@@ -1,12 +1,30 @@
 /**
- * Cloudflare Turnstile. Enforced only when both keys are set, so local and
- * preview environments work without a captcha.
+ * Cloudflare Turnstile. Enforced when both keys are set. Outside production a
+ * missing key turns the captcha off so local work needs no keys; in
+ * production (NODE_ENV=production, which includes Vercel previews) missing
+ * keys refuse signup instead of silently running without a captcha. Previews
+ * can use Cloudflare's published test keys.
  */
 const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TURNSTILE_TIMEOUT_MS = 8000;
 
+export type TurnstileMode = "enforced" | "off" | "missing";
+
+type TurnstileEnv = {
+  NODE_ENV?: string;
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+};
+
+/** "missing" means production without both keys: signup must be refused. */
+export function turnstileMode(env: TurnstileEnv = process.env): TurnstileMode {
+  const hasKeys = Boolean(env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() && env.TURNSTILE_SECRET_KEY?.trim());
+  if (hasKeys) return "enforced";
+  return env.NODE_ENV === "production" ? "missing" : "off";
+}
+
 export function isTurnstileEnabled(): boolean {
-  return Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && process.env.TURNSTILE_SECRET_KEY);
+  return turnstileMode() === "enforced";
 }
 
 export async function verifyTurnstile(token: string | null, ip: string): Promise<boolean> {

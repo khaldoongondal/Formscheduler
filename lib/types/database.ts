@@ -361,6 +361,10 @@ export interface Database {
         Args: { p_bucket_key: string; p_window_seconds: number };
         Returns: number;
       };
+      rate_limit_hit_capped: {
+        Args: { p_bucket_key: string; p_window_seconds: number; p_limit: number };
+        Returns: boolean;
+      };
       get_auth_user_id_by_email: {
         Args: { p_email: string };
         Returns: string | null;

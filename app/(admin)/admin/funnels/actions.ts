@@ -21,6 +21,7 @@ import {
   validateQuestionDisqualificationRule,
   type QuestionDisqualificationOperator
 } from "@/lib/funnels/disqualification";
+import { assertOptionInFunnel, assertQuestionInFunnel } from "@/lib/funnels/question-scope";
 import type { QuestionType } from "@/lib/types/database";
 import {
   createFunnel,
@@ -34,7 +35,8 @@ import {
   updateQuestion,
   uploadFunnelLogo,
   upsertQuestion,
-  upsertQuestionOption
+  upsertQuestionOption,
+  type FunnelScope
 } from "@/lib/funnels/service";
 
 function optionalString(formData: FormData, key: string) {
@@ -175,14 +177,18 @@ function moveIntakeFlowOrder(order: string[], itemKey: string, direction: string
   return nextOrder;
 }
 
-async function syncQuestionDisplayOrderFromFlow(funnelId: string, flowOrder: string[]) {
+async function syncQuestionDisplayOrderFromFlow(scope: FunnelScope, flowOrder: string[]) {
+  const funnelId = scope.funnelId;
   const questionKeys = flowOrder.filter((key) => key.startsWith("question:"));
   await Promise.all(
     questionKeys.map((key, index) =>
-      updateQuestionOrder({
-        question_id: key.slice("question:".length),
-        display_order: index + 1
-      })
+      updateQuestionOrder(
+        {
+          question_id: key.slice("question:".length),
+          display_order: index + 1
+        },
+        scope
+      )
     )
   );
   revalidatePath(`/admin/funnels/${funnelId}`);
@@ -290,7 +296,7 @@ export async function updateFunnelAction(formData: FormData) {
 
 export async function updateContactFieldsAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  const { funnel } = await assertAdminFunnel(id);
+  const { funnel, tenantId } = await assertAdminFunnel(id);
   const questionIds = funnel.questions.map((question) => question.id);
   const intakeFlowOrder = intakeFlowOrderFromForm(formData, questionIds);
   const disabledQuestionIds = disabledQuestionIdsFromForm(formData, questionIds);
@@ -304,7 +310,7 @@ export async function updateContactFieldsAction(formData: FormData) {
       disabled_question_ids: disabledQuestionIds,
       intake_flow_order: intakeFlowOrder
     });
-    await syncQuestionDisplayOrderFromFlow(id, intakeFlowOrder);
+    await syncQuestionDisplayOrderFromFlow({ funnelId: id, tenantId }, intakeFlowOrder);
   } catch (error) {
     redirectWithError(`/admin/funnels/${id}`, error);
   }
@@ -358,7 +364,7 @@ export async function moveIntakeFlowItemAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const itemKey = String(formData.get("item_key") ?? "");
   const direction = String(formData.get("direction") ?? "");
-  const { funnel } = await assertAdminFunnel(id);
+  const { funnel, tenantId } = await assertAdminFunnel(id);
   const questionIds = funnel.questions.map((question) => question.id);
   const currentFlowOrder = resolveIntakeFlowEditorOrder(funnel.qualification_rule, questionIds).map(intakeFlowItemToKey);
   const nextFlowOrder = moveIntakeFlowOrder(currentFlowOrder, itemKey, direction);
@@ -378,7 +384,7 @@ export async function moveIntakeFlowItemAction(formData: FormData) {
       disabled_question_ids: disabledQuestionIds,
       intake_flow_order: nextFlowOrder
     });
-    await syncQuestionDisplayOrderFromFlow(id, nextFlowOrder);
+    await syncQuestionDisplayOrderFromFlow({ funnelId: id, tenantId }, nextFlowOrder);
   } catch (error) {
     redirectWithError(`/admin/funnels/${id}`, error);
   }
@@ -426,7 +432,8 @@ export async function moveQuestionAction(formData: FormData) {
   const funnelId = String(formData.get("funnel_id") ?? "");
   const questionId = String(formData.get("question_id") ?? "");
   const direction = String(formData.get("direction") ?? "");
-  const { funnel } = await assertAdminFunnel(funnelId);
+  const { funnel, tenantId } = await assertAdminFunnel(funnelId);
+  const scope = { funnelId, tenantId };
   const sortedQuestions = [...funnel.questions].sort((first, second) => first.display_order - second.display_order);
   const currentIndex = sortedQuestions.findIndex((question) => question.id === questionId);
   const targetIndex = direction === "up" ? currentIndex - 1 : direction === "down" ? currentIndex + 1 : -1;
@@ -439,14 +446,20 @@ export async function moveQuestionAction(formData: FormData) {
   const currentQuestion = sortedQuestions[currentIndex];
   const targetQuestion = sortedQuestions[targetIndex];
   await Promise.all([
-    updateQuestionOrder({
-      question_id: currentQuestion.id,
-      display_order: targetQuestion.display_order
-    }),
-    updateQuestionOrder({
-      question_id: targetQuestion.id,
-      display_order: currentQuestion.display_order
-    })
+    updateQuestionOrder(
+      {
+        question_id: currentQuestion.id,
+        display_order: targetQuestion.display_order
+      },
+      scope
+    ),
+    updateQuestionOrder(
+      {
+        question_id: targetQuestion.id,
+        display_order: currentQuestion.display_order
+      },
+      scope
+    )
   ]);
 
   revalidatePath(`/admin/funnels/${funnelId}`);
@@ -488,9 +501,10 @@ export async function upsertQuestionAction(formData: FormData) {
 
   let savedQuestionId: string;
   try {
+    if (questionId) assertQuestionInFunnel(funnel.questions, questionId);
     validateQuestionDisqualificationRule(questionType, disqualificationRule);
     const savedQuestion = questionId
-      ? await updateQuestion({ id: questionId, ...payload })
+      ? await updateQuestion({ id: questionId, ...payload }, { funnelId, tenantId })
       : await upsertQuestion(payload);
     savedQuestionId = savedQuestion.id;
   } catch (error) {
@@ -503,9 +517,11 @@ export async function upsertQuestionAction(formData: FormData) {
 
 export async function deleteQuestionAction(formData: FormData) {
   const funnelId = String(formData.get("funnel_id") ?? "");
-  await assertAdminFunnel(funnelId);
+  const { tenantId, funnel } = await assertAdminFunnel(funnelId);
   try {
-    await deleteQuestion(String(formData.get("id") ?? ""));
+    const questionId = String(formData.get("id") ?? "");
+    assertQuestionInFunnel(funnel.questions, questionId);
+    await deleteQuestion(questionId, { funnelId, tenantId });
   } catch (error) {
     redirectWithError(`/admin/funnels/${funnelId}`, error);
   }
@@ -515,11 +531,12 @@ export async function deleteQuestionAction(formData: FormData) {
 
 export async function upsertQuestionOptionAction(formData: FormData) {
   const funnelId = String(formData.get("funnel_id") ?? "");
-  const { tenantId } = await assertAdminFunnel(funnelId);
+  const { tenantId, funnel } = await assertAdminFunnel(funnelId);
   const questionId = String(formData.get("question_id") ?? "");
   let savedOptionId: string;
 
   try {
+    assertQuestionInFunnel(funnel.questions, questionId);
     const savedOption = await upsertQuestionOption({
       tenant_id: tenantId,
       question_id: questionId,
@@ -528,7 +545,7 @@ export async function upsertQuestionOptionAction(formData: FormData) {
       value: String(formData.get("value") ?? ""),
       display_order: Number(formData.get("display_order") ?? 0),
       is_disqualifying: formData.get("is_disqualifying") === "on"
-    });
+    }, { funnelId, tenantId });
     savedOptionId = savedOption.id;
   } catch (error) {
     redirectWithError(`/admin/funnels/${funnelId}`, error);
@@ -541,9 +558,11 @@ export async function upsertQuestionOptionAction(formData: FormData) {
 export async function deleteQuestionOptionAction(formData: FormData) {
   const funnelId = String(formData.get("funnel_id") ?? "");
   const questionId = String(formData.get("question_id") ?? "");
-  await assertAdminFunnel(funnelId);
+  const { tenantId, funnel } = await assertAdminFunnel(funnelId);
   try {
-    await deleteQuestionOption(String(formData.get("id") ?? ""));
+    const optionId = String(formData.get("id") ?? "");
+    assertOptionInFunnel(funnel.questions, questionId, optionId);
+    await deleteQuestionOption(optionId, questionId, { funnelId, tenantId });
   } catch (error) {
     redirectWithError(`/admin/funnels/${funnelId}`, error);
   }

@@ -39,3 +39,50 @@ export function utcDayStartSeconds(nowMs: number): number {
 export function isOverLimit(hits: number, limit: number): boolean {
   return hits > limit;
 }
+
+export type CapCheck = {
+  scope: string;
+  subject: string;
+  limit: number;
+  /**
+   * "count": always adds the hit (a visitor's own budget).
+   * "capped": adds the hit only while under the limit, so blocked attempts
+   * never use up a shared form or tenant allowance.
+   */
+  mode: "count" | "capped";
+};
+
+/**
+ * Runs cap checks in order and stops at the first one that blocks, so later
+ * (shared) counters are not touched by a request that is already refused.
+ */
+export async function runCapChecks(
+  checks: CapCheck[],
+  hit: (check: CapCheck) => Promise<boolean>
+): Promise<boolean> {
+  for (const check of checks) {
+    if (!(await hit(check))) return false;
+  }
+  return true;
+}
+
+/** Daily cap checks for one request: per IP and form first, then form, then tenant. */
+export function buildDailyCapChecks(input: {
+  scope: string;
+  funnelId: string;
+  tenantId?: string;
+  ipHash?: string;
+  perIpPerForm: number;
+  perForm: number;
+  perTenant: number | null;
+}): CapCheck[] {
+  const checks: CapCheck[] = [];
+  if (input.ipHash) {
+    checks.push({ scope: input.scope, subject: `ip-${input.ipHash}-form-${input.funnelId}`, limit: input.perIpPerForm, mode: "count" });
+  }
+  checks.push({ scope: input.scope, subject: `form-${input.funnelId}`, limit: input.perForm, mode: "capped" });
+  if (input.tenantId && input.perTenant !== null) {
+    checks.push({ scope: input.scope, subject: `tenant-${input.tenantId}`, limit: input.perTenant, mode: "capped" });
+  }
+  return checks;
+}

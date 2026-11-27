@@ -4,13 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { resolveSetPasswordNext } from "@/lib/validation/signup";
 
 export default async function SetPasswordPage({
   searchParams
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
   const params = await searchParams;
+  const next = resolveSetPasswordNext(params.next);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
@@ -26,6 +28,7 @@ export default async function SetPasswordPage({
         </CardHeader>
         <CardContent>
           <form action={setPassword} className="space-y-4">
+            <input type="hidden" name="next" value={next} />
             <div className="space-y-2">
               <Label htmlFor="password">New password</Label>
               <Input

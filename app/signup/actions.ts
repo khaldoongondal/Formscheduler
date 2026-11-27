@@ -6,7 +6,8 @@ import { PublicError } from "@/lib/api/responses";
 import { getClientIp } from "@/lib/security/client-ip";
 import { checkActionRateLimit } from "@/lib/security/rate-limit";
 import { startSignup } from "@/lib/signup/service";
-import { isTurnstileEnabled, verifyTurnstile } from "@/lib/signup/turnstile";
+import { CONTACT_EMAIL } from "@/lib/billing/plans";
+import { turnstileMode, verifyTurnstile } from "@/lib/signup/turnstile";
 import {
   SIGNUP_GENERIC_ERROR,
   formDataToRecord,
@@ -30,6 +31,7 @@ export type SignupState = {
 
 const SIGNUP_RATE_LIMITED_MESSAGE = "Too many signup attempts. Please wait an hour and try again.";
 const CAPTCHA_FAILED_MESSAGE = "Please complete the security check.";
+const SIGNUP_UNAVAILABLE_MESSAGE = `Signup is not available right now. Please email ${CONTACT_EMAIL}.`;
 
 function keptValues(record: Record<string, string>): SignupValues {
   // Everything typed except the password comes back to the form.
@@ -48,21 +50,28 @@ export async function signUpAction(_prev: SignupState, formData: FormData): Prom
   const values = keptValues(record);
   const requestHeaders = await headers();
 
-  if (!(await checkActionRateLimit(requestHeaders, "signup"))) {
-    return { values, fieldErrors: { form: SIGNUP_RATE_LIMITED_MESSAGE } };
-  }
-
+  // Field errors first, without using up a signup attempt.
   const parsed = parseSignupForm(record);
   if (!parsed.ok) {
     return { values, fieldErrors: parsed.fieldErrors };
   }
 
-  if (isTurnstileEnabled()) {
+  const captcha = turnstileMode();
+  if (captcha === "missing") {
+    console.error("[signup] refused: Turnstile keys are not set in production");
+    return { values, fieldErrors: { form: SIGNUP_UNAVAILABLE_MESSAGE } };
+  }
+  if (captcha === "enforced") {
     const token = record["cf-turnstile-response"] || null;
     const passed = await verifyTurnstile(token, getClientIp(requestHeaders));
     if (!passed) {
       return { values, fieldErrors: { form: CAPTCHA_FAILED_MESSAGE } };
     }
+  }
+
+  // Counted only for valid forms, right before an account is created.
+  if (!(await checkActionRateLimit(requestHeaders, "signup"))) {
+    return { values, fieldErrors: { form: SIGNUP_RATE_LIMITED_MESSAGE } };
   }
 
   try {

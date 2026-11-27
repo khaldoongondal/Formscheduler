@@ -2,17 +2,25 @@
 
 import { redirect } from "next/navigation";
 import { createAuthServerClient } from "@/lib/supabase/auth";
+import { resolveSetPasswordNext } from "@/lib/validation/signup";
+
+function setPasswordUrl(error: string, next: string) {
+  const params = new URLSearchParams({ error });
+  if (next !== "/admin/funnels") params.set("next", next);
+  return `/auth/set-password?${params.toString()}`;
+}
 
 export async function setPassword(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const confirm = String(formData.get("confirm") ?? "");
+  const next = resolveSetPasswordNext(formData.get("next"));
 
   if (password.length < 8) {
-    redirect(`/auth/set-password?error=${encodeURIComponent("Password must be at least 8 characters.")}`);
+    redirect(setPasswordUrl("Password must be at least 8 characters.", next));
   }
 
   if (password !== confirm) {
-    redirect(`/auth/set-password?error=${encodeURIComponent("Passwords do not match.")}`);
+    redirect(setPasswordUrl("Passwords do not match.", next));
   }
 
   const supabase = await createAuthServerClient();
@@ -27,8 +35,8 @@ export async function setPassword(formData: FormData) {
   const { error } = await supabase.auth.updateUser({ password });
 
   if (error) {
-    redirect(`/auth/set-password?error=${encodeURIComponent(error.message)}`);
+    redirect(setPasswordUrl(error.message, next));
   }
 
-  redirect("/admin/funnels");
+  redirect(next);
 }

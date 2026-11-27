@@ -238,7 +238,7 @@ export async function startLeadSession(input: unknown, request?: Request) {
   const parsed = startLeadSessionSchema.parse(input);
   const supabase = createServiceClient();
   const funnel = await assertFunnelServesPublic(parsed.funnel_id);
-  if (!(await enforceDailyCap("lead", { funnelId: funnel.id, tenantId: funnel.tenant_id }))) {
+  if (!(await enforceDailyCap("lead", { funnelId: funnel.id, tenantId: funnel.tenant_id, headers: request?.headers }))) {
     throw new PublicError("This form is not taking new submissions right now. Please try again later.", 429);
   }
 

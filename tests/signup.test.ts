@@ -5,14 +5,19 @@ import {
   RESEND_RATE_LIMITED_MESSAGE,
   SIGNUP_GENERIC_ERROR,
   UNVERIFIED_EMAIL_MESSAGE,
+  SIGNUP_VERIFY_NEXT,
   buildResetLink,
+  buildSignupEmailRedirect,
   buildSignupWebhookPayload,
   buildVerifyLink,
   formDataToRecord,
   isValidSignupPhone,
   normalizeSignupPhone,
-  parseSignupForm
+  parseSignupForm,
+  resolveConfirmNext,
+  resolveSetPasswordNext
 } from "@/lib/validation/signup";
+import { turnstileMode } from "@/lib/signup/turnstile";
 
 const EM_DASH = String.fromCharCode(0x2014);
 
@@ -97,16 +102,14 @@ describe("parseSignupForm", () => {
     expectFieldError({ website: "not a site" }, "website");
   });
 
-  it("rejects a 7 character password", () => {
-    expectFieldError({ password: "1234567" }, "password");
+  it("does not need a password (it is chosen after verification)", () => {
+    assert.equal(parseWith({ password: undefined }).ok, true);
   });
 
-  it("rejects a 73 character password", () => {
-    expectFieldError({ password: "a".repeat(73) }, "password");
-  });
-
-  it("accepts a 72 character password", () => {
-    assert.equal(parseWith({ password: "a".repeat(72) }).ok, true);
+  it("ignores a password posted with the form", () => {
+    const result = parseWith({ password: "attacker-chosen" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal("password" in result.data, false);
   });
 
   it("requires the terms checkbox", () => {
@@ -150,15 +153,25 @@ describe("buildSignupWebhookPayload", () => {
 });
 
 describe("buildVerifyLink", () => {
-  it("encodes the token and always lands on the welcome page", () => {
+  it("encodes the token and lands on set-password, then the welcome page", () => {
     const link = buildVerifyLink("https://formbooking.gondaltech.app/", "a b&c=d", "signup");
     assert.equal(
       link,
-      "https://formbooking.gondaltech.app/auth/confirm?token_hash=a%20b%26c%3Dd&type=signup&next=/admin/welcome"
+      "https://formbooking.gondaltech.app/auth/confirm?token_hash=a%20b%26c%3Dd&type=signup&next=%2Fauth%2Fset-password%3Fnext%3D%2Fadmin%2Fwelcome"
     );
     const url = new URL(link);
     assert.equal(url.searchParams.get("token_hash"), "a b&c=d");
-    assert.equal(url.searchParams.get("next"), "/admin/welcome");
+    assert.equal(url.searchParams.get("next"), SIGNUP_VERIFY_NEXT);
+    assert.deepEqual(resolveConfirmNext(url.searchParams.get("next")), {
+      pathname: "/auth/set-password",
+      search: "?next=%2Fadmin%2Fwelcome"
+    });
+  });
+
+  it("uses the same next for the Supabase fallback email", () => {
+    const url = new URL(buildSignupEmailRedirect("https://formbooking.gondaltech.app/"));
+    assert.equal(url.pathname, "/auth/confirm");
+    assert.equal(url.searchParams.get("next"), SIGNUP_VERIFY_NEXT);
   });
 
   it("builds reset links that land on set-password", () => {
@@ -166,6 +179,42 @@ describe("buildVerifyLink", () => {
     assert.equal(url.searchParams.get("token_hash"), "tok/en");
     assert.equal(url.searchParams.get("type"), "recovery");
     assert.equal(url.searchParams.get("next"), "/auth/set-password");
+  });
+});
+
+describe("resolveConfirmNext", () => {
+  it("allows the known bare paths", () => {
+    for (const path of ["/auth/set-password", "/admin/funnels", "/admin/welcome"]) {
+      assert.deepEqual(resolveConfirmNext(path), { pathname: path, search: "" });
+    }
+  });
+
+  it("falls back to set-password for anything else", () => {
+    const fallback = { pathname: "/auth/set-password", search: "" };
+    for (const value of [
+      null,
+      "",
+      "https://evil.example",
+      "//evil.example",
+      "/admin/clients",
+      "/auth/set-password?next=https://evil.example",
+      "/auth/set-password?next=/admin/clients",
+      "/auth/set-password?next=/admin/welcome&x=1",
+      "/auth/set-password?next=/admin/welcome?x",
+      "/admin/funnels?next=/admin/welcome"
+    ]) {
+      assert.deepEqual(resolveConfirmNext(value), fallback, String(value));
+    }
+  });
+});
+
+describe("resolveSetPasswordNext", () => {
+  it("allows only the welcome page and the forms list", () => {
+    assert.equal(resolveSetPasswordNext("/admin/welcome"), "/admin/welcome");
+    assert.equal(resolveSetPasswordNext("/admin/funnels"), "/admin/funnels");
+    assert.equal(resolveSetPasswordNext("https://evil.example"), "/admin/funnels");
+    assert.equal(resolveSetPasswordNext("/admin/clients"), "/admin/funnels");
+    assert.equal(resolveSetPasswordNext(null), "/admin/funnels");
   });
 });
 
@@ -190,5 +239,23 @@ describe("signup copy", () => {
     for (const message of messages) {
       assert.equal(message.includes(EM_DASH), false, message);
     }
+  });
+});
+
+describe("turnstileMode", () => {
+  it("is enforced whenever both keys are set", () => {
+    assert.equal(turnstileMode({ NODE_ENV: "production", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s", TURNSTILE_SECRET_KEY: "k" }), "enforced");
+    assert.equal(turnstileMode({ NODE_ENV: "development", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s", TURNSTILE_SECRET_KEY: "k" }), "enforced");
+  });
+
+  it("refuses signup in production when a key is missing or blank", () => {
+    assert.equal(turnstileMode({ NODE_ENV: "production" }), "missing");
+    assert.equal(turnstileMode({ NODE_ENV: "production", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s" }), "missing");
+    assert.equal(turnstileMode({ NODE_ENV: "production", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "s", TURNSTILE_SECRET_KEY: "  " }), "missing");
+  });
+
+  it("is off outside production when keys are missing", () => {
+    assert.equal(turnstileMode({ NODE_ENV: "development" }), "off");
+    assert.equal(turnstileMode({ NODE_ENV: "test" }), "off");
   });
 });

@@ -1,0 +1,138 @@
+-- FormBook Sprint 1 review fixes. Additive and safe to run twice.
+--
+-- 1. Close the direct-write path through the Supabase REST API. Every write in
+--    the app goes through the service role, but 0005 let any tenant owner or
+--    admin update tenants, funnels and other tenant tables with their own
+--    login. With public signup that would let anyone change their own plan,
+--    badge, suspension, form takedown or slug. Reads (select policies) stay.
+-- 2. A guard trigger on tenants and funnels that refuses changes to the
+--    platform-controlled columns from the anon and authenticated roles, even
+--    if a write grant comes back by mistake later.
+-- 3. rate_limit_hit_capped(): a counter that only counts allowed hits, so
+--    refused requests do not use up a shared daily cap.
+
+-- 1. Drop the write policies from 0005. Select policies are kept.
+drop policy if exists tenants_update_owner_admin on public.tenants;
+drop policy if exists tenant_members_insert_owner on public.tenant_members;
+drop policy if exists tenant_members_update_owner on public.tenant_members;
+drop policy if exists tenant_members_delete_owner on public.tenant_members;
+drop policy if exists ghl_connections_insert_owner_admin on public.ghl_connections;
+drop policy if exists ghl_connections_update_owner_admin on public.ghl_connections;
+drop policy if exists ghl_connections_delete_owner_admin on public.ghl_connections;
+drop policy if exists funnels_insert_owner_admin on public.funnels;
+drop policy if exists funnels_update_owner_admin on public.funnels;
+drop policy if exists funnels_delete_owner_admin on public.funnels;
+drop policy if exists questions_insert_owner_admin on public.questions;
+drop policy if exists questions_update_owner_admin on public.questions;
+drop policy if exists questions_delete_owner_admin on public.questions;
+drop policy if exists question_options_insert_owner_admin on public.question_options;
+drop policy if exists question_options_update_owner_admin on public.question_options;
+drop policy if exists question_options_delete_owner_admin on public.question_options;
+drop policy if exists lead_sessions_write_owner_admin on public.lead_sessions;
+drop policy if exists lead_status_history_write_owner_admin on public.lead_status_history;
+drop policy if exists lead_answers_write_owner_admin on public.lead_answers;
+drop policy if exists booking_attempts_write_owner_admin on public.booking_attempts;
+drop policy if exists analytics_events_write_owner_admin on public.analytics_events;
+
+-- And revoke the table write grants from the API roles.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'tenants', 'tenant_members', 'ghl_connections', 'funnels', 'questions', 'question_options',
+    'lead_sessions', 'lead_status_history', 'lead_answers', 'booking_attempts', 'analytics_events',
+    'plan_limits', 'rate_limit_counters', 'form_reports', 'signup_requests', 'owner_audit_log'
+  ]
+  loop
+    if to_regclass('public.' || t) is not null then
+      execute format('revoke insert, update, delete, truncate on table public.%I from anon, authenticated', t);
+    end if;
+  end loop;
+end $$;
+
+-- 2. Guard triggers. Security invoker on purpose: current_user is the API role
+-- (anon or authenticated) for REST calls, and service_role or postgres for the
+-- app and migrations, which may change these columns.
+create or replace function public.guard_tenant_platform_columns()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if current_user in ('anon', 'authenticated') and (
+    new.plan is distinct from old.plan or
+    new.slug is distinct from old.slug or
+    new.badge_enabled is distinct from old.badge_enabled or
+    new.plan_before_suspension is distinct from old.plan_before_suspension or
+    new.suspended_at is distinct from old.suspended_at or
+    new.suspension_reason is distinct from old.suspension_reason or
+    new.signup_source is distinct from old.signup_source
+  ) then
+    raise exception 'FORMBOOK_FORBIDDEN:tenant_platform_columns' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists tenants_guard_platform_columns on public.tenants;
+create trigger tenants_guard_platform_columns
+before update on public.tenants
+for each row execute function public.guard_tenant_platform_columns();
+
+create or replace function public.guard_funnel_platform_columns()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if current_user in ('anon', 'authenticated') and (
+    new.tenant_id is distinct from old.tenant_id or
+    new.slug is distinct from old.slug or
+    new.taken_down_at is distinct from old.taken_down_at or
+    new.taken_down_reason is distinct from old.taken_down_reason
+  ) then
+    raise exception 'FORMBOOK_FORBIDDEN:funnel_platform_columns' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists funnels_guard_platform_columns on public.funnels;
+create trigger funnels_guard_platform_columns
+before update on public.funnels
+for each row execute function public.guard_funnel_platform_columns();
+
+-- 3. Counter that adds a hit only while under the limit. Returns true when
+-- the hit was allowed (and counted), false when the limit was already reached.
+create or replace function public.rate_limit_hit_capped(p_bucket_key text, p_window_seconds integer, p_limit integer)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_hits integer;
+begin
+  if p_window_seconds is null or p_window_seconds < 1 or p_window_seconds > 172800 then
+    raise exception 'rate_limit_hit_capped: invalid window' using errcode = '22023';
+  end if;
+  if p_limit is null or p_limit < 0 then
+    raise exception 'rate_limit_hit_capped: invalid limit' using errcode = '22023';
+  end if;
+  if p_limit = 0 then
+    return false;
+  end if;
+
+  insert into public.rate_limit_counters as c (bucket_key, hits, expires_at)
+  values (p_bucket_key, 1, now() + make_interval(secs => p_window_seconds))
+  on conflict (bucket_key) do update set hits = c.hits + 1
+    where c.hits < p_limit
+  returning c.hits into v_hits;
+
+  -- No row returned: the counter was already at the limit and was not changed.
+  return v_hits is not null;
+end;
+$$;
+revoke all on function public.rate_limit_hit_capped(text, integer, integer) from public, anon, authenticated;
+grant execute on function public.rate_limit_hit_capped(text, integer, integer) to service_role;
+
+notify pgrst, 'reload schema';
