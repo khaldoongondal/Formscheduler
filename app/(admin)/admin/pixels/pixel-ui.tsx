@@ -1,3 +1,4 @@
+import { FREEZE_COPY } from "@/lib/billing/freeze";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -23,8 +24,17 @@ export const PIXEL_SAVED_MESSAGES: Record<string, string> = {
   deleted: "Pixel deleted.",
   sending: "Sending settings saved.",
   "test-ok": "Meta received the test event. Check the Test events tab in Events Manager.",
-  "nothing-held": "There are no held events to send."
+  "nothing-held": "There are no held events to send.",
+  "pixel-reactivated": FREEZE_COPY.pixelReactivated
 };
+
+export function FrozenPixelBadge() {
+  return (
+    <span className="rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700" title={FREEZE_COPY.badgeTitle}>
+      {FREEZE_COPY.badge}
+    </span>
+  );
+}
 
 export function usageLine(count: number, max: number, planName: string) {
   return `Meta pixels: ${count} of ${max} on the ${planName} plan.`;

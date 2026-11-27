@@ -19,13 +19,21 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: commonSecurityHeaders },
-      // Everything except /embed/* refuses to be framed. Embed snippets use
-      // /embed/* (iframe) or window.open (popup), so they keep working.
+      // Everything except /embed/* and /preview/* refuses to be framed. Embed
+      // snippets use /embed/* (iframe) or window.open (popup), so they keep working.
       {
-        source: "/((?!embed/).*)",
+        source: "/((?!embed/|preview/).*)",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Content-Security-Policy", value: "frame-ancestors 'none'" }
+        ]
+      },
+      // The in-editor form preview is framed by the form editor on this origin only.
+      {
+        source: "/preview/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" }
         ]
       },
       {

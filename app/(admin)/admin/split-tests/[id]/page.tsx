@@ -38,7 +38,13 @@ import {
   SPLIT_TEST_SAVED_MESSAGES,
   unavailableMemberWarning
 } from "@/lib/split-tests/rules";
-import { getRunningTestsByFunnel, getSplitTest, type SplitTestWithMembers } from "@/lib/split-tests/service";
+import {
+  getRunningTestsByFunnel,
+  getSplitTest,
+  getSplitTestEndReason,
+  type SplitTestWithMembers
+} from "@/lib/split-tests/service";
+import { FREEZE_COPY } from "@/lib/billing/freeze";
 import { getSplitTestResults, splitTestPeriod, type SplitTestResults } from "@/lib/split-tests/results-service";
 import { resolveAnalyticsDateRange } from "@/lib/analytics/service";
 import { listTestSpend } from "@/lib/spend/service";
@@ -70,7 +76,10 @@ export default async function SplitTestDetailPage({
   const tenantId = await getAdminTenantId();
   const test = await getSplitTest(tenantId, id);
   if (!test) notFound();
-  const demoSeedBatch = await getDemoSeedBatch(tenantId, "split_tests", test.id);
+  const [demoSeedBatch, endReason] = await Promise.all([
+    getDemoSeedBatch(tenantId, "split_tests", test.id),
+    test.status === "ended" ? getSplitTestEndReason(tenantId, test.id) : Promise.resolve(null)
+  ]);
 
   const query = searchParams ? await searchParams : {};
   const actionError = typeof query.error === "string" ? query.error : null;
@@ -135,6 +144,9 @@ export default async function SplitTestDetailPage({
           {test.started_at ? ` | Started ${formatDate(test.started_at)}` : ""}
           {test.ended_at ? ` | Ended ${formatDate(test.ended_at)}` : ""}
         </p>
+        {endReason === "form_frozen" ? (
+          <p className="mt-2 text-sm text-sky-800">{FREEZE_COPY.testEndedFrozen}</p>
+        ) : null}
       </div>
 
       {demoSeedBatch ? <SampleDataBanner /> : null}

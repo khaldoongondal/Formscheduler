@@ -1,4 +1,5 @@
 import { CheckCircle2 } from "lucide-react";
+import { UpgradeHint } from "@/components/admin/upgrade-hint";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SPLIT_TEST_COPY, splitTestStatusLabel } from "@/lib/split-tests/rules";
@@ -112,6 +113,7 @@ export function ActionError({ message }: { message: string }) {
     <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900" role="alert">
       <p className="font-semibold">This change was not saved.</p>
       <p>{message}</p>
+      <UpgradeHint message={message} />
     </div>
   );
 }

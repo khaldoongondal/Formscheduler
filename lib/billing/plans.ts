@@ -67,7 +67,7 @@ export function parsePlanState(value: unknown): PlanState {
 
 export function formatPlanPrice(plan: PlanDefinition): string {
   if (plan.monthlyPriceCents <= 0) return "Free";
-  return `$${(plan.monthlyPriceCents / 100).toFixed(2)} a month`;
+  return `$${(plan.monthlyPriceCents / 100).toFixed(2)} USD a month`;
 }
 
 export type FormUsage = { activeForms: number; draftForms: number };
@@ -83,11 +83,16 @@ export const TAKEN_DOWN_MESSAGE = `This form was taken down by FormBook. Email $
 
 export function activeLimitMessage(plan: PlanDefinition): string {
   const base = `You have reached the limit of ${plan.maxActiveForms} active forms on the ${plan.name} plan. Switch another form to draft first`;
-  return plan.id === "free" ? `${base}, or email ${CONTACT_EMAIL} about the Scaling plan.` : `${base}.`;
+  return plan.id === "free"
+    ? `${base}, or upgrade to Scaling for up to ${PLANS.scaling.maxActiveForms} active forms.`
+    : `${base}.`;
 }
 
 export function draftLimitMessage(plan: PlanDefinition): string {
-  return `You have reached the limit of ${plan.maxDraftForms} draft forms on the ${plan.name} plan. Delete a draft you no longer need, then try again.`;
+  const base = `You have reached the limit of ${plan.maxDraftForms} draft forms on the ${plan.name} plan. Delete a draft you no longer need`;
+  return plan.id === "free"
+    ? `${base}, or upgrade to Scaling for up to ${PLANS.scaling.maxDraftForms} drafts.`
+    : `${base}, then try again.`;
 }
 
 /** Pure decision mirroring the SQL trigger. `usage` excludes the form being changed. */
@@ -112,7 +117,10 @@ export function checkFormLimit(state: PlanState, usage: FormUsage, action: FormL
 export function pixelLimitMessage(plan: PlanDefinition): string {
   const noun = plan.maxPixels === 1 ? "Meta pixel" : "Meta pixels";
   const base = `You have reached the limit of ${plan.maxPixels} ${noun} on the ${plan.name} plan. Remove a pixel first`;
-  return plan.id === "free" ? `${base}, or email ${CONTACT_EMAIL} about the Scaling plan.` : `${base}.`;
+  const scalingNoun = PLANS.scaling.maxPixels === 1 ? "Meta pixel" : "Meta pixels";
+  return plan.id === "free"
+    ? `${base}, or upgrade to Scaling for up to ${PLANS.scaling.maxPixels} ${scalingNoun}.`
+    : `${base}.`;
 }
 
 /** Pure decision mirroring the meta_pixels limit trigger. `pixelCount` excludes the pixel being changed. */

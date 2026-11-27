@@ -30,7 +30,9 @@ import { addFormSpend, deleteFormSpend } from "@/lib/spend/service";
 import { funnelDeleteBlocker } from "@/lib/split-tests/rules";
 import { listSplitTestsUsingFunnel } from "@/lib/split-tests/service";
 import type { QuestionType } from "@/lib/types/database";
+import { TEMPLATE_QUESTIONS_FAILED_MESSAGE, getFormTemplate } from "@/lib/funnels/templates";
 import {
+  applyTemplateToFunnel,
   createFunnel,
   deleteFunnel,
   deleteQuestion,
@@ -204,6 +206,8 @@ async function syncQuestionDisplayOrderFromFlow(scope: FunnelScope, flowOrder: s
 
 export async function createFunnelAction(formData: FormData) {
   const { tenantId } = await requireTenantRole(["owner", "admin"]);
+  // Unknown or missing values behave as a blank form (decision D17).
+  const template = getFormTemplate(formData.get("template"));
   let funnelId: string;
 
   try {
@@ -211,7 +215,7 @@ export async function createFunnelAction(formData: FormData) {
       tenant_id: tenantId,
       name: String(formData.get("name") ?? ""),
       slug: String(formData.get("slug") ?? ""),
-      description: optionalString(formData, "description"),
+      description: optionalString(formData, "description") ?? template?.defaultDescription,
       show_intro_headline: true,
       show_intro_description: true,
       redirect_url: optionalString(formData, "redirect_url"),
@@ -226,16 +230,19 @@ export async function createFunnelAction(formData: FormData) {
       disqualified_pipeline_id: optionalString(formData, "disqualified_pipeline_id"),
       disqualified_pipeline_stage_id: optionalString(formData, "disqualified_pipeline_stage_id"),
       phone_pulse_enabled: formData.get("phone_pulse_enabled") !== "off",
-      contact_fields: {
-        full_name: true,
-        phone: true,
-        first_name: false,
-        last_name: false,
-        email: false
-      },
-      contact_field_order: defaultContactFieldOrder,
+      contact_fields: template
+        ? { ...template.contactFields }
+        : {
+            full_name: true,
+            phone: true,
+            first_name: false,
+            last_name: false,
+            email: false
+          },
+      contact_field_order: template ? [...template.contactFieldOrder] : defaultContactFieldOrder,
       contact_fields_per_page: 4,
-      appointment_title: trimmedString(formData, "appointment_title"),
+      appointment_title: trimmedString(formData, "appointment_title") || (template?.appointmentTitle ?? ""),
+      ...(template ? { template_key: template.key } : {}),
       opportunity_name_template:
         optionalString(formData, "opportunity_name_template") ?? "{{lead_name}}",
       theme: {
@@ -250,6 +257,18 @@ export async function createFunnelAction(formData: FormData) {
     funnelId = funnel.id;
   } catch (error) {
     redirectWithError("/admin/funnels", error);
+  }
+
+  if (template) {
+    try {
+      await applyTemplateToFunnel({ funnelId, tenantId, template });
+    } catch (error) {
+      console.error("[funnels] template questions failed", error instanceof Error ? error.message : "unknown error");
+      // Best effort: never leave a half-built draft behind.
+      await deleteFunnel(funnelId, tenantId).catch(() => undefined);
+      revalidatePath("/admin/funnels");
+      redirect(`/admin/funnels?create=1&template=${encodeURIComponent(template.key)}&error=${encodeURIComponent(TEMPLATE_QUESTIONS_FAILED_MESSAGE)}#create-funnel`);
+    }
   }
 
   revalidatePath("/admin/funnels");

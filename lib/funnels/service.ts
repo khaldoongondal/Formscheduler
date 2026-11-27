@@ -1,5 +1,6 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { mergeAnalyticsTargetCountryCodes, mergeAnalyticsTrafficSources } from "@/lib/analytics/country-filter";
+import { FREEZE_COPY } from "@/lib/billing/freeze";
 import { assertFormLimit, planLimitMessageForTenant } from "@/lib/billing/plan-service";
 import { parsePlanState, planLimitMessageFromError, shouldShowBadge } from "@/lib/billing/plans";
 import { formReadinessError, funnelReadinessInput, readinessConnectionFrom } from "@/lib/connections/readiness";
@@ -7,6 +8,7 @@ import { getConnectionRowForTenant, toConnectionSummary } from "@/lib/connection
 import type { CalendarKind, CrmKind } from "@/lib/connections/types";
 import { QUESTION_NOT_FOUND_MESSAGE, questionUpdateFields } from "@/lib/funnels/question-scope";
 import { buildCopySlug, checkSlug } from "@/lib/funnels/slugs";
+import type { FormTemplate } from "@/lib/funnels/templates";
 import { getGhlConnectionForTenant } from "@/lib/ghl/connections";
 import { EXTENSION_BY_MIME, sniffImageMime, type SniffedImage } from "@/lib/security/image-sniff";
 import { getPixel } from "@/lib/meta/pixels";
@@ -82,9 +84,11 @@ export type BookingFunnel = Pick<
    * consent confirmation and the checkbox switched on; else null (no checkbox).
    */
   meta_consent_checkbox_label: string | null;
+  /** Set only by getPreviewFunnel: the preview shows a note for Calendly forms. */
+  calendar_provider?: CalendarKind;
 };
 
-type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge" | "meta_consent_checkbox_label">;
+type BookingFunnelBase = Omit<BookingFunnel, "questions" | "show_badge" | "meta_consent_checkbox_label" | "calendar_provider">;
 
 /**
  * One tenant read for public pages: whether the tenant is suspended and whether
@@ -247,21 +251,26 @@ export async function getBookingFunnelById(id: string): Promise<BookingFunnel | 
   return loadBookingFunnel({ id });
 }
 
+const BOOKING_FUNNEL_SELECT =
+  "id,tenant_id,name,slug,description,is_published,logo_url,logo_alignment,show_intro_headline,show_intro_description,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
+// The Meta consent checkbox settings come with the form row, so a form
+// without a pixel costs no extra query (P3.12). Falls back without them
+// before migration 0027.
+const BOOKING_META_FUNNEL_SELECT = `${BOOKING_FUNNEL_SELECT},meta_pixel_id,meta_consent_confirmed_at,meta_consent_checkbox_enabled,meta_consent_checkbox_label`;
+const BOOKING_FALLBACK_NO_LOGO_ALIGNMENT_SELECT =
+  "id,tenant_id,name,slug,description,is_published,logo_url,show_intro_headline,show_intro_description,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
+const BOOKING_FALLBACK_FUNNEL_SELECT =
+  "id,tenant_id,name,slug,description,is_published,logo_url,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
+
 async function loadBookingFunnel(filter: { slug: string } | { id: string }): Promise<BookingFunnel | null> {
   noStore();
   const supabase = createServiceClient();
   const filterColumn = "slug" in filter ? "slug" : "id";
   const filterValue = "slug" in filter ? filter.slug : filter.id;
-  const funnelSelect =
-    "id,tenant_id,name,slug,description,is_published,logo_url,logo_alignment,show_intro_headline,show_intro_description,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
-  // The Meta consent checkbox settings come with the form row, so a form
-  // without a pixel costs no extra query (P3.12). Falls back without them
-  // before migration 0027.
-  const metaFunnelSelect = `${funnelSelect},meta_pixel_id,meta_consent_confirmed_at,meta_consent_checkbox_enabled,meta_consent_checkbox_label`;
-  const fallbackWithoutLogoAlignmentSelect =
-    "id,tenant_id,name,slug,description,is_published,logo_url,show_intro_headline,show_intro_description,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
-  const fallbackFunnelSelect =
-    "id,tenant_id,name,slug,description,is_published,logo_url,primary_color,accent_color,button_color,border_radius,phone_pulse_enabled,slot_duration_minutes,appointment_title,redirect_url,qualification_rule";
+  const funnelSelect = BOOKING_FUNNEL_SELECT;
+  const metaFunnelSelect = BOOKING_META_FUNNEL_SELECT;
+  const fallbackWithoutLogoAlignmentSelect = BOOKING_FALLBACK_NO_LOGO_ALIGNMENT_SELECT;
+  const fallbackFunnelSelect = BOOKING_FALLBACK_FUNNEL_SELECT;
 
   // Newest columns first; each 42703 (missing column) steps down one select.
   // The last two predate taken_down_at, so they do not filter on it.
@@ -300,10 +309,23 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
   if (tenantFlags.suspended) return null;
 
   const metaConsentCheckboxLabel = consentCheckboxLabelFor(funnelRow);
+  const questions = await loadBookingQuestions(funnelBase.id);
+
+  return {
+    ...funnelBase,
+    show_badge: tenantFlags.showBadge,
+    meta_consent_checkbox_label: metaConsentCheckboxLabel,
+    questions
+  };
+}
+
+/** Questions and options of one form, in display order, as the booking flow reads them. */
+async function loadBookingQuestions(funnelId: string): Promise<BookingQuestion[]> {
+  const supabase = createServiceClient();
   const { data: questions, error: questionsError } = await supabase
     .from("questions")
     .select("id,tenant_id,funnel_id,stable_key,label,help_text,question_type,placeholder,is_required,display_order,validation")
-    .eq("funnel_id", funnelBase.id)
+    .eq("funnel_id", funnelId)
     .order("display_order", { ascending: true });
 
   if (questionsError) throw new Error(questionsError.message);
@@ -335,14 +357,46 @@ async function loadBookingFunnel(filter: { slug: string } | { id: string }): Pro
     }
   }
 
+  return questions.map((question) => ({
+    ...question,
+    options: options.filter((option) => option.question_id === question.id)
+  }));
+}
+
+/**
+ * The tenant's own form for the in-editor preview (decision D18): same shape as
+ * the public booking read, filtered by id and tenant, with no active,
+ * takedown or suspension gate. Null for a missing form or another tenant's.
+ */
+export async function getPreviewFunnel(tenantId: string, funnelId: string): Promise<BookingFunnel | null> {
+  noStore();
+  const supabase = createServiceClient();
+  const attempts = [
+    `${BOOKING_META_FUNNEL_SELECT},calendar_provider`,
+    BOOKING_META_FUNNEL_SELECT,
+    BOOKING_FUNNEL_SELECT,
+    BOOKING_FALLBACK_NO_LOGO_ALIGNMENT_SELECT,
+    BOOKING_FALLBACK_FUNNEL_SELECT
+  ];
+  type PreviewRow = FunnelSlugRow & FunnelConsentCheckboxFields & { calendar_provider?: CalendarKind | null };
+  let funnelRow: PreviewRow | null = null;
+  for (const select of attempts) {
+    const result = await supabase.from("funnels").select(select).eq("id", funnelId).eq("tenant_id", tenantId).maybeSingle();
+    if (result.error?.code === "42703") continue;
+    if (result.error) throw new Error(result.error.message);
+    funnelRow = result.data ? (result.data as unknown as PreviewRow) : null;
+    break;
+  }
+  if (!funnelRow) return null;
+
+  const funnelBase = normalizeBookingFunnelBase(funnelRow);
+  const [tenantFlags, questions] = await Promise.all([getPublicTenantFlags(tenantId), loadBookingQuestions(funnelBase.id)]);
   return {
     ...funnelBase,
     show_badge: tenantFlags.showBadge,
-    meta_consent_checkbox_label: metaConsentCheckboxLabel,
-    questions: questions.map((question) => ({
-      ...question,
-      options: options.filter((option) => option.question_id === question.id)
-    }))
+    meta_consent_checkbox_label: consentCheckboxLabelFor(funnelRow),
+    calendar_provider: funnelRow.calendar_provider ?? "ghl",
+    questions
   };
 }
 
@@ -504,6 +558,22 @@ async function loadExistingForUpdate(id: string): Promise<ExistingForUpdate> {
     calendar_settings: asSettings(row.calendar_settings),
     crm_settings: asSettings(row.crm_settings)
   };
+}
+
+/**
+ * Throws the activation message when the tenant's form cannot go live with its
+ * saved calendar and CRM (same rule as activation), or "Not found." when the
+ * form is not the tenant's.
+ */
+export async function assertFunnelReadyToPublish(tenantId: string, funnelId: string): Promise<void> {
+  let existing: ExistingForUpdate;
+  try {
+    existing = await loadExistingForUpdate(funnelId);
+  } catch {
+    throw new Error("Not found.");
+  }
+  if (existing.tenant_id !== tenantId) throw new Error("Not found.");
+  await assertReadyToPublish(tenantId, existing);
 }
 
 export async function updateFunnel(input: unknown) {
@@ -755,6 +825,44 @@ export async function duplicateFunnel(id: string) {
   return funnel;
 }
 
+/**
+ * Adds a starter template's questions and options to a form just created
+ * (decision D17). Throws on the first failure; the caller deletes the form.
+ */
+export async function applyTemplateToFunnel(input: { funnelId: string; tenantId: string; template: FormTemplate }) {
+  const scope: FunnelScope = { funnelId: input.funnelId, tenantId: input.tenantId };
+  for (const [index, question] of input.template.questions.entries()) {
+    const saved = await upsertQuestion({
+      tenant_id: input.tenantId,
+      funnel_id: input.funnelId,
+      stable_key: question.stable_key,
+      label: question.label,
+      help_text: question.help_text,
+      question_type: question.question_type,
+      placeholder: question.placeholder,
+      is_required: question.is_required,
+      display_order: index,
+      ghl_field_key: null,
+      ghl_custom_field_id: null,
+      ghl_custom_field_key: null
+    });
+    for (const [optionIndex, option] of question.options.entries()) {
+      await upsertQuestionOption(
+        {
+          tenant_id: input.tenantId,
+          question_id: saved.id,
+          stable_key: option.stable_key,
+          label: option.label,
+          value: option.value,
+          display_order: optionIndex,
+          is_disqualifying: option.is_disqualifying
+        },
+        scope
+      );
+    }
+  }
+}
+
 /** Deletes the tenant's own form. The caller checks split tests first. */
 export async function deleteFunnel(id: string, tenantId: string) {
   const supabase = createServiceClient();
@@ -926,15 +1034,18 @@ export async function updateFunnelMeta(
   }
   if (!current) throw new Error("Not found.");
 
-  if (parsed.meta_pixel_id && !(await getPixel(tenantId, parsed.meta_pixel_id))) {
-    throw new Error(PIXEL_MESSAGES.foreignPixel);
-  }
-
   const row = current as unknown as {
     meta_pixel_id: string | null;
     meta_consent_confirmed_at: string | null;
     meta_consent_confirmed_by: string | null;
   };
+
+  if (parsed.meta_pixel_id) {
+    const chosen = await getPixel(tenantId, parsed.meta_pixel_id);
+    if (!chosen) throw new Error(PIXEL_MESSAGES.foreignPixel);
+    // A frozen pixel cannot be newly chosen; a form that already uses it keeps saving.
+    if (chosen.frozen && chosen.id !== row.meta_pixel_id) throw new Error(FREEZE_COPY.frozenPixelChoice);
+  }
   const decision = resolveFunnelMetaUpdate(
     {
       meta_pixel_id: row.meta_pixel_id ?? null,

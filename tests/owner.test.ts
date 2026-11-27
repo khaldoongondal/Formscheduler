@@ -125,7 +125,7 @@ describe("owner display helpers", () => {
     assert.equal(planDowngradeWarning("suspended", 50), null);
     assert.equal(
       planDowngradeWarning("free", 5),
-      "This client has 5 active forms and the Bootstrapping plan allows 3. Their current forms stay live; they cannot activate more until they are under the limit."
+      "This client has 5 active forms and the Bootstrapping plan allows 3. Switching freezes 2 of them, the ones with the oldest leads. Nothing is deleted, and the client can choose which forms stay active."
     );
   });
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { CalendarDays, LogOut, PlugZap, Radio, Rows3, Split, Users } from "lucide-react";
+import { CalendarDays, Gauge, LogOut, PlugZap, Radio, Rows3, Split, Users } from "lucide-react";
 import { signOut } from "@/app/login/actions";
 import { getPlatformOwner } from "@/lib/auth/owner-server";
 import { ScrollPositionRestorer } from "@/components/admin/scroll-position-restorer";
@@ -12,7 +12,8 @@ const navItems = [
   { href: "/admin/funnels", label: "Funnels", Icon: Rows3 },
   { href: "/admin/split-tests", label: "Split Tests", Icon: Split },
   { href: "/admin/pixels", label: "Meta Pixels", Icon: Radio },
-  { href: "/admin/connections", label: "Connections", Icon: PlugZap }
+  { href: "/admin/connections", label: "Connections", Icon: PlugZap },
+  { href: "/admin/plan", label: "Plan", Icon: Gauge }
 ];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {

@@ -128,7 +128,7 @@ describe("messages", () => {
   it("use the exact wording", () => {
     assert.equal(
       activeLimitMessage(PLANS.free),
-      `You have reached the limit of 3 active forms on the Bootstrapping plan. Switch another form to draft first, or email ${CONTACT_EMAIL} about the Scaling plan.`
+      `You have reached the limit of 3 active forms on the Bootstrapping plan. Switch another form to draft first, or upgrade to Scaling for up to 30 active forms.`
     );
     assert.equal(
       activeLimitMessage(PLANS.scaling),
@@ -136,7 +136,11 @@ describe("messages", () => {
     );
     assert.equal(
       draftLimitMessage(PLANS.free),
-      "You have reached the limit of 10 draft forms on the Bootstrapping plan. Delete a draft you no longer need, then try again."
+      "You have reached the limit of 10 draft forms on the Bootstrapping plan. Delete a draft you no longer need, or upgrade to Scaling for up to 100 drafts."
+    );
+    assert.equal(
+      draftLimitMessage(PLANS.scaling),
+      "You have reached the limit of 100 draft forms on the Scaling plan. Delete a draft you no longer need, then try again."
     );
     assert.equal(SUSPENDED_MESSAGE, `This account is suspended. Email ${CONTACT_EMAIL} to restore it.`);
   });
@@ -175,6 +179,6 @@ describe("messages", () => {
 describe("formatPlanPrice", () => {
   it("formats free and paid plans", () => {
     assert.equal(formatPlanPrice(PLANS.free), "Free");
-    assert.equal(formatPlanPrice(PLANS.scaling), "$14.47 a month");
+    assert.equal(formatPlanPrice(PLANS.scaling), "$14.47 USD a month");
   });
 });

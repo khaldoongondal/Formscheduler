@@ -149,6 +149,29 @@ export async function getSplitTest(tenantId: string, testId: string): Promise<Sp
   return test ?? null;
 }
 
+/**
+ * Why an ended test ended automatically ("form_frozen" when a plan change froze
+ * one of its forms, migration 0032). Null for tests ended by hand, other
+ * tenants' tests, or before the column exists.
+ */
+export async function getSplitTestEndReason(tenantId: string, testId: string): Promise<"form_frozen" | null> {
+  noStore();
+  if (!isUuid(testId)) return null;
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from("split_tests")
+      .select("end_reason")
+      .eq("tenant_id", tenantId)
+      .eq("id", testId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return (data as { end_reason?: unknown }).end_reason === "form_frozen" ? "form_frozen" : null;
+  } catch {
+    return null;
+  }
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: string): boolean {
   return UUID_PATTERN.test(value);

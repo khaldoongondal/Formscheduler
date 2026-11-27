@@ -1,6 +1,7 @@
 import { CheckCircle2 } from "lucide-react";
 import type { PlanState } from "@/lib/billing/plans";
-import { planStateLabel } from "@/lib/owner/format";
+import { LIFECYCLE_COPY } from "@/lib/lifecycle/events";
+import { planChangeNotice, planStateLabel, type PlanChangeCounts } from "@/lib/owner/format";
 
 const SAVED_MESSAGES: Record<string, string> = {
   plan: "Plan saved.",
@@ -9,12 +10,25 @@ const SAVED_MESSAGES: Record<string, string> = {
   restored: "Account restored.",
   "form-taken-down": "Form taken down.",
   "form-restored": "Form restored as a draft. The client can activate it again.",
-  "report-dismissed": "Report dismissed."
+  "report-dismissed": "Report dismissed.",
+  lifecycle_test: LIFECYCLE_COPY.testSent
 };
 
-/** Success or error line for the owner pages, from ?saved= or ?error=. */
-export function OwnerNotices({ saved, error }: { saved?: string; error?: string }) {
-  const savedMessage = saved ? SAVED_MESSAGES[saved] : undefined;
+/** Success or error line for the owner pages, from ?saved= or ?error= (plus a plan change's counts). */
+export function OwnerNotices({
+  saved,
+  error,
+  counts
+}: {
+  saved?: string;
+  error?: string;
+  counts?: PlanChangeCounts;
+}) {
+  const baseMessage = saved ? SAVED_MESSAGES[saved] : undefined;
+  const countLines = baseMessage && counts && (saved === "plan" || saved === "suspended" || saved === "restored")
+    ? planChangeNotice(counts)
+    : [];
+  const savedMessage = baseMessage ? [baseMessage, ...countLines].join(" ") : undefined;
   return (
     <>
       {error ? (

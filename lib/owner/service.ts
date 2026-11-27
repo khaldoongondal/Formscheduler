@@ -1,6 +1,17 @@
 import { unstable_noStore as noStore } from "next/cache";
+import { normalizeAccountRef } from "@/lib/billing/account-ref";
+import type { FormActivity, PixelActivity } from "@/lib/billing/freeze";
+import {
+  applyPlanChange,
+  loadFormActivity,
+  loadPixelActivity,
+  type AppliedPlanChange
+} from "@/lib/billing/plan-change-service";
+import { resolveOwnerPlanChange, type OwnerPlanRequest } from "@/lib/billing/plan-transitions";
 import { parsePlanState, type PlanState } from "@/lib/billing/plans";
+import type { TenantPlanFields } from "@/lib/provisioning/plan-change";
 import { setFunnelTakedown } from "@/lib/funnels/takedown";
+import { toActivationRow, type ActivationRow } from "@/lib/owner/activation";
 import {
   ownerOptionalReasonSchema,
   ownerPlanSchema,
@@ -9,7 +20,16 @@ import {
   ownerUuidSchema
 } from "@/lib/owner/format";
 import { createServiceClient } from "@/lib/supabase/server";
-import type { FormReport, Funnel, Json, OwnerAuditAction, OwnerClientListRow, Tenant } from "@/lib/types/database";
+import type {
+  FormReport,
+  Funnel,
+  Json,
+  OwnerActivationRow,
+  OwnerAuditAction,
+  OwnerClientListRow,
+  Tenant,
+  TenantPlanChange
+} from "@/lib/types/database";
 
 /**
  * Platform-owner operations. Callers must have passed requirePlatformOwner()
@@ -36,7 +56,7 @@ export type ClientRow = {
 export type ClientForm = Pick<
   Funnel,
   "id" | "name" | "slug" | "is_published" | "taken_down_at" | "taken_down_reason" | "updated_at"
->;
+> & { frozen_at: string | null };
 
 export type OpenReport = FormReport & { funnel_name: string | null; tenant_name: string | null };
 
@@ -94,9 +114,40 @@ export async function listClients(): Promise<ClientRow[]> {
   return ((data ?? []) as OwnerClientListRow[]).map(toClientRow);
 }
 
-export async function getClientDetail(
-  tenantIdInput: string
-): Promise<{ client: ClientRow; tenant: Tenant; forms: ClientForm[] } | null> {
+export type ClientDetail = {
+  client: ClientRow;
+  tenant: Tenant;
+  forms: ClientForm[];
+  /** For the downgrade freeze preview (empty before migration 0032). */
+  formActivity: FormActivity[];
+  pixelActivity: PixelActivity[];
+  accountRef: string | null;
+};
+
+const CLIENT_FORM_COLUMNS = "id,name,slug,is_published,taken_down_at,taken_down_reason,updated_at";
+
+async function loadClientForms(tenantId: string): Promise<ClientForm[]> {
+  const supabase = createServiceClient();
+  const withFrozen = await supabase
+    .from("funnels")
+    .select(`${CLIENT_FORM_COLUMNS},frozen_at`)
+    .eq("tenant_id", tenantId)
+    .order("updated_at", { ascending: false });
+  if (!withFrozen.error) {
+    return ((withFrozen.data ?? []) as unknown as ClientForm[]).map((form) => ({ ...form, frozen_at: form.frozen_at ?? null }));
+  }
+  if (withFrozen.error.code !== "42703") throw new Error(withFrozen.error.message);
+  // Before migration 0032: no form is frozen.
+  const fallback = await supabase
+    .from("funnels")
+    .select(CLIENT_FORM_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .order("updated_at", { ascending: false });
+  if (fallback.error) throw new Error(fallback.error.message);
+  return ((fallback.data ?? []) as unknown as Omit<ClientForm, "frozen_at">[]).map((form) => ({ ...form, frozen_at: null }));
+}
+
+export async function getClientDetail(tenantIdInput: string): Promise<ClientDetail | null> {
   noStore();
   const parsedId = ownerUuidSchema.safeParse(tenantIdInput);
   if (!parsedId.success) return null;
@@ -111,20 +162,30 @@ export async function getClientDetail(
   if (tenantError) throw new Error(tenantError.message);
   if (!tenant) return null;
 
-  const [clients, formsResult] = await Promise.all([
+  const [clients, forms, formActivity, pixelActivity] = await Promise.all([
     listClients(),
-    supabase
-      .from("funnels")
-      .select("id,name,slug,is_published,taken_down_at,taken_down_reason,updated_at")
-      .eq("tenant_id", tenantId)
-      .order("updated_at", { ascending: false })
+    loadClientForms(tenantId),
+    loadFormActivity(tenantId).catch((error: unknown): FormActivity[] => {
+      console.error("[owner] form activity read failed:", error instanceof Error ? error.message : "unknown error");
+      return [];
+    }),
+    loadPixelActivity(tenantId).catch((error: unknown): PixelActivity[] => {
+      console.error("[owner] pixel activity read failed:", error instanceof Error ? error.message : "unknown error");
+      return [];
+    })
   ]);
-  if (formsResult.error) throw new Error(formsResult.error.message);
 
   const client = clients.find((row) => row.tenantId === tenantId);
   if (!client) return null;
 
-  return { client, tenant: tenant as Tenant, forms: (formsResult.data ?? []) as ClientForm[] };
+  return {
+    client,
+    tenant: tenant as Tenant,
+    forms,
+    formActivity,
+    pixelActivity,
+    accountRef: normalizeAccountRef((tenant as Tenant).account_ref)
+  };
 }
 
 export async function listOpenReports(): Promise<OpenReport[]> {
@@ -163,34 +224,54 @@ export async function listOpenReports(): Promise<OpenReport[]> {
   }));
 }
 
-async function loadTenantPlan(tenantId: string) {
+async function loadTenantPlanFields(tenantId: string): Promise<TenantPlanFields> {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("tenants")
-    .select("id,plan,suspended_at")
+    .select("id,plan,plan_before_suspension,suspended_at,suspension_reason")
     .eq("id", tenantId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Client not found.");
-  return { plan: parsePlanState(data.plan), suspendedAt: data.suspended_at as string | null };
+  return {
+    plan: parsePlanState(data.plan),
+    plan_before_suspension: data.plan_before_suspension ?? null,
+    suspended_at: data.suspended_at ?? null,
+    suspension_reason: data.suspension_reason ?? null
+  };
 }
 
-export async function setTenantPlan(actor: string, tenantIdInput: string, planInput: PlanState): Promise<void> {
+/** Freeze and restore counts for the audit log details. */
+function changeDetails(change: AppliedPlanChange): Record<string, Json> {
+  return {
+    frozen_forms: change.frozenForms,
+    frozen_pixels: change.frozenPixels,
+    restored_forms: change.restoredForms,
+    restored_pixels: change.restoredPixels,
+    ended_split_tests: change.endedSplitTests
+  };
+}
+
+function ownerChange(actor: string, tenantId: string, request: OwnerPlanRequest, note: string | null) {
+  return applyPlanChange({
+    tenantId,
+    resolve: (current) => resolveOwnerPlanChange(current, request, new Date().toISOString()),
+    source: "owner",
+    actor,
+    note
+  });
+}
+
+export async function setTenantPlan(actor: string, tenantIdInput: string, planInput: PlanState): Promise<AppliedPlanChange> {
   const tenantId = ownerUuidSchema.parse(tenantIdInput);
   const plan = ownerPlanSchema.parse(planInput);
   if (plan === "suspended") {
-    await suspendTenant(actor, tenantId);
-    return;
+    return suspendTenant(actor, tenantId);
   }
 
-  const previous = await loadTenantPlan(tenantId);
-  const supabase = createServiceClient();
-  const { error } = await supabase
-    .from("tenants")
-    .update({ plan, plan_before_suspension: null, suspended_at: null, suspension_reason: null })
-    .eq("id", tenantId);
-  if (error) throw new Error(error.message);
-  await writeAudit(actor, "set_plan", "tenant", tenantId, { from: previous.plan, to: plan });
+  const change = await ownerChange(actor, tenantId, { kind: "set", plan }, null);
+  await writeAudit(actor, "set_plan", "tenant", tenantId, { from: change.from, to: plan, ...changeDetails(change) });
+  return change;
 }
 
 export async function setTenantBadge(actor: string, tenantIdInput: string, enabled: boolean): Promise<void> {
@@ -206,47 +287,160 @@ export async function setTenantBadge(actor: string, tenantIdInput: string, enabl
   await writeAudit(actor, "set_badge", "tenant", tenantId, { enabled: enabled === true });
 }
 
-export async function suspendTenant(actor: string, tenantIdInput: string, reasonInput?: string): Promise<void> {
+export async function suspendTenant(actor: string, tenantIdInput: string, reasonInput?: string): Promise<AppliedPlanChange> {
   const tenantId = ownerUuidSchema.parse(tenantIdInput);
-  const reason = ownerOptionalReasonSchema.parse(reasonInput);
-  const current = await loadTenantPlan(tenantId);
-  const supabase = createServiceClient();
+  const reason = ownerOptionalReasonSchema.parse(reasonInput) ?? null;
+  const current = await loadTenantPlanFields(tenantId);
 
-  const update =
-    current.plan === "suspended"
-      ? // Already suspended: keep the saved plan and the original date, update the reason.
-        { suspension_reason: reason ?? null, suspended_at: current.suspendedAt ?? new Date().toISOString() }
-      : {
-          plan: "suspended" as const,
-          plan_before_suspension: current.plan,
-          suspended_at: new Date().toISOString(),
-          suspension_reason: reason ?? null
-        };
+  const resolution = resolveOwnerPlanChange(current, { kind: "suspend", reason }, new Date().toISOString());
+  if (resolution.reasonOnly) {
+    // Already suspended: keep the saved plan and the original date, update the reason (no history row).
+    const supabase = createServiceClient();
+    const { error } = await supabase.from("tenants").update(resolution.update ?? {}).eq("id", tenantId);
+    if (error) throw new Error(error.message);
+    await writeAudit(actor, "suspend", "tenant", tenantId, { from: current.plan, reason });
+    return {
+      changed: false,
+      historyId: null,
+      from: "suspended",
+      to: "suspended",
+      frozenForms: 0,
+      frozenPixels: 0,
+      restoredForms: 0,
+      restoredPixels: 0,
+      endedSplitTests: 0
+    };
+  }
 
-  const { error } = await supabase.from("tenants").update(update).eq("id", tenantId);
-  if (error) throw new Error(error.message);
-  await writeAudit(actor, "suspend", "tenant", tenantId, { from: current.plan, reason: reason ?? null });
+  const change = await ownerChange(actor, tenantId, { kind: "suspend", reason }, reason);
+  await writeAudit(actor, "suspend", "tenant", tenantId, { from: change.from, reason, ...changeDetails(change) });
+  return change;
 }
 
-export async function restoreTenant(actor: string, tenantIdInput: string): Promise<void> {
+export async function restoreTenant(actor: string, tenantIdInput: string): Promise<AppliedPlanChange> {
   const tenantId = ownerUuidSchema.parse(tenantIdInput);
-  const supabase = createServiceClient();
-  const { data, error: readError } = await supabase
-    .from("tenants")
-    .select("id,plan,plan_before_suspension")
-    .eq("id", tenantId)
-    .maybeSingle();
-  if (readError) throw new Error(readError.message);
-  if (!data) throw new Error("Client not found.");
+  const change = await ownerChange(actor, tenantId, { kind: "restore" }, null);
+  await writeAudit(actor, "restore", "tenant", tenantId, { to: change.to, ...changeDetails(change) });
+  return change;
+}
 
-  const savedPlan = data.plan_before_suspension === "scaling" ? "scaling" : "free";
-  const restoredPlan = parsePlanState(data.plan) === "suspended" ? savedPlan : parsePlanState(data.plan);
-  const { error } = await supabase
+export type PlanHistoryRow = {
+  id: string;
+  fromPlan: PlanState | null;
+  toPlan: PlanState;
+  source: "provision" | "owner";
+  actor: string | null;
+  note: string | null;
+  frozenForms: number;
+  frozenPixels: number;
+  restoredForms: number;
+  restoredPixels: number;
+  endedSplitTests: number;
+  createdAt: string;
+};
+
+/** Plan changes of one client, newest first. Owner pages only; empty when the table is missing. */
+export async function listPlanHistory(tenantIdInput: string, limit = 50): Promise<PlanHistoryRow[]> {
+  noStore();
+  const parsedId = ownerUuidSchema.safeParse(tenantIdInput);
+  if (!parsedId.success) return [];
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("tenant_plan_changes")
+    .select("id,from_plan,to_plan,source,actor,note,frozen_forms,frozen_pixels,restored_forms,restored_pixels,ended_split_tests,created_at")
+    .eq("tenant_id", parsedId.data)
+    .order("created_at", { ascending: false })
+    .limit(Math.max(1, Math.min(200, Math.floor(limit))));
+  if (error) {
+    console.error("[owner] plan history read failed:", error.code ?? "error");
+    return [];
+  }
+  return ((data ?? []) as unknown as TenantPlanChange[]).map((row) => ({
+    id: row.id,
+    fromPlan: row.from_plan ? parsePlanState(row.from_plan) : null,
+    toPlan: parsePlanState(row.to_plan),
+    source: row.source === "owner" ? "owner" : "provision",
+    actor: row.actor ?? null,
+    note: row.note ?? null,
+    frozenForms: Number(row.frozen_forms ?? 0),
+    frozenPixels: Number(row.frozen_pixels ?? 0),
+    restoredForms: Number(row.restored_forms ?? 0),
+    restoredPixels: Number(row.restored_pixels ?? 0),
+    endedSplitTests: Number(row.ended_split_tests ?? 0),
+    createdAt: row.created_at
+  }));
+}
+
+/** Every tenant's milestones for the activation funnel. Empty when migration 0034 is missing. */
+export async function listActivationRows(): Promise<ActivationRow[]> {
+  noStore();
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.rpc("owner_activation_rows");
+  if (error) {
+    console.error("[owner] activation rows read failed:", error.code ?? "error");
+    return [];
+  }
+  return ((data ?? []) as OwnerActivationRow[]).map(toActivationRow);
+}
+
+/** Signup dates of requests not verified yet. Empty when migration 0034 is missing. */
+export async function listPendingSignupDates(): Promise<string[]> {
+  noStore();
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.rpc("owner_pending_signups");
+  if (error) {
+    console.error("[owner] pending signups read failed:", error.code ?? "error");
+    return [];
+  }
+  return ((data ?? []) as Array<{ created_at: string | null }>)
+    .map((row) => row.created_at)
+    .filter((value): value is string => typeof value === "string");
+}
+
+export { getLifecycleStatus } from "@/lib/lifecycle/queue";
+
+export type ClientMilestones = {
+  createdAt: string | null;
+  accountRef: string | null;
+  firstConnectionAt: string | null;
+  firstFormActivatedAt: string | null;
+  firstLeadAt: string | null;
+  firstBookingAt: string | null;
+};
+
+const EMPTY_MILESTONES: ClientMilestones = {
+  createdAt: null,
+  accountRef: null,
+  firstConnectionAt: null,
+  firstFormActivatedAt: null,
+  firstLeadAt: null,
+  firstBookingAt: null
+};
+
+/** One client's milestones. Nulls when migration 0034 is missing. */
+export async function getClientMilestones(tenantIdInput: string): Promise<ClientMilestones> {
+  noStore();
+  const parsedId = ownerUuidSchema.safeParse(tenantIdInput);
+  if (!parsedId.success) return EMPTY_MILESTONES;
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
     .from("tenants")
-    .update({ plan: restoredPlan, plan_before_suspension: null, suspended_at: null, suspension_reason: null })
-    .eq("id", tenantId);
-  if (error) throw new Error(error.message);
-  await writeAudit(actor, "restore", "tenant", tenantId, { to: restoredPlan });
+    .select("created_at,account_ref,first_connection_at,first_form_activated_at,first_lead_at,first_booking_at")
+    .eq("id", parsedId.data)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error("[owner] milestones read failed:", error.code ?? "error");
+    return EMPTY_MILESTONES;
+  }
+  const row = data as Partial<Tenant>;
+  return {
+    createdAt: row.created_at ?? null,
+    accountRef: normalizeAccountRef(row.account_ref),
+    firstConnectionAt: row.first_connection_at ?? null,
+    firstFormActivatedAt: row.first_form_activated_at ?? null,
+    firstLeadAt: row.first_lead_at ?? null,
+    firstBookingAt: row.first_booking_at ?? null
+  };
 }
 
 export async function takeDownForm(actor: string, funnelIdInput: string, reasonInput: string): Promise<void> {

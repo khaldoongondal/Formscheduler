@@ -67,8 +67,12 @@ import {
   resolveAnalyticsTrafficSources
 } from "@/lib/analytics/country-filter";
 import { getAdminTenantId } from "@/lib/auth/tenant";
+import { reactivateFrozenFormAction } from "@/app/(admin)/admin/plan/actions";
+import { FREEZE_COPY } from "@/lib/billing/freeze";
+import { PLAN_COPY } from "@/lib/billing/plan-copy";
 import { getTenantPlanSummary } from "@/lib/billing/plan-service";
 import { activeLimitMessage } from "@/lib/billing/plans";
+import { UpgradeHint } from "@/components/admin/upgrade-hint";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
 import { buildIframeSnippet, buildPopupSnippet, buildSplitTestIframeSnippet } from "@/lib/embed/snippets";
 import {
@@ -100,6 +104,8 @@ import type { Json, QuestionType } from "@/lib/types/database";
 import { SaveSubmitButton } from "@/components/admin/save-submit-button";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { CopySnippetButton } from "@/components/admin/copy-snippet-button";
+import { FormPreviewPanel } from "@/components/admin/form-preview-panel";
+import { markEmbedCopiedAction } from "@/app/(admin)/admin/onboarding-actions";
 import { LogoDropInput } from "@/components/admin/logo-drop-input";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { SampleDataBanner } from "@/components/admin/sample-data-banner";
@@ -134,6 +140,7 @@ export default async function FunnelDetailPage({
     from?: string;
     option?: string;
     preset?: string;
+    preview?: string;
     question?: string;
     saved?: string;
     to?: string;
@@ -197,6 +204,7 @@ export default async function FunnelDetailPage({
   ]);
   const deleteBlocker = funnelDeleteBlocker(testsUsingForm);
   const runningTest = runningTests.get(funnel.id) ?? null;
+  const isFrozen = !funnel.is_published && Boolean(funnel.frozen_at);
   const activeLimitHint =
     !funnel.is_published && planSummary.plan && planSummary.usage.activeForms >= planSummary.plan.maxActiveForms
       ? activeLimitMessage(planSummary.plan)
@@ -353,7 +361,7 @@ export default async function FunnelDetailPage({
           </Button>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{funnel.name}</h1>
-            <StatusBadge published={funnel.is_published} />
+            <StatusBadge published={funnel.is_published} frozen={isFrozen} />
             {funnel.taken_down_at ? <TakenDownBadge /> : null}
             {runningTest ? (
               <Link
@@ -387,6 +395,24 @@ export default async function FunnelDetailPage({
       </div>
 
       {funnel.demo_seed_batch ? <SampleDataBanner /> : null}
+      {isFrozen ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900" role="status">
+          <p className="font-semibold">{FREEZE_COPY.formBannerTitle}</p>
+          <p>{FREEZE_COPY.formBannerBody}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <form action={reactivateFrozenFormAction}>
+              <input type="hidden" name="funnel_id" value={funnel.id} />
+              <input type="hidden" name="return_to" value={`/admin/funnels/${funnel.id}`} />
+              <Button type="submit" size="sm">
+                {FREEZE_COPY.reactivate}
+              </Button>
+            </form>
+            <Link href="/admin/plan" className="text-sm font-semibold text-emerald-700 hover:underline">
+              {PLAN_COPY.seePlans}
+            </Link>
+          </div>
+        </div>
+      ) : null}
       {actionError ? <ActionError message={actionError} /> : null}
       {bookingSetupWarning ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
@@ -395,6 +421,7 @@ export default async function FunnelDetailPage({
       ) : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
 
+      <FormPreviewPanel funnelId={funnel.id} version={funnel.updated_at} forceOpen={query.preview === "1"}>
       <Card id="performance" className="scroll-mt-24 overflow-hidden">
         <CardHeader className="border-b border-slate-100 p-5">
           <div className="min-w-0">
@@ -530,7 +557,7 @@ export default async function FunnelDetailPage({
               </div>
             </CardHeader>
             <CardContent className="pt-6">
-              <form action={updateFunnelAction} className="space-y-5">
+              <form action={updateFunnelAction} className="space-y-5" data-preview-theme="">
                 <input type="hidden" name="id" value={funnel.id} />
 
                 <SettingsGroup
@@ -568,9 +595,10 @@ export default async function FunnelDetailPage({
                       description="Active forms are live on their /book and /embed links. Drafts are only visible to you."
                     />
                     {activeLimitHint ? (
-                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                        {activeLimitHint}
-                      </p>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                        <p>{activeLimitHint}</p>
+                        <UpgradeHint message={activeLimitHint} />
+                      </div>
                     ) : null}
                     {runningTest ? (
                       <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-900">
@@ -1149,9 +1177,9 @@ export default async function FunnelDetailPage({
             </CardHeader>
             <CardContent className="space-y-6">
               <section className="grid gap-4 xl:grid-cols-3">
-                <Snippet label="Full page" value={bookUrl} />
-                <Snippet label="Iframe" value={buildIframeSnippet(embedUrl)} />
-                <Snippet label="Popup" value={buildPopupSnippet(embedUrl)} />
+                <Snippet label="Full page" value={bookUrl} onCopied={markEmbedCopiedAction} />
+                <Snippet label="Iframe" value={buildIframeSnippet(embedUrl)} onCopied={markEmbedCopiedAction} />
+                <Snippet label="Popup" value={buildPopupSnippet(embedUrl)} onCopied={markEmbedCopiedAction} />
               </section>
               <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="mb-4">
@@ -1161,8 +1189,8 @@ export default async function FunnelDetailPage({
                   </p>
                 </div>
                 <div className="grid gap-4 xl:grid-cols-2">
-                  <Snippet label="Control popup iframe" value={controlSplitIframe} />
-                  <Snippet label="Variation popup iframe" value={variationSplitIframe} />
+                  <Snippet label="Control popup iframe" value={controlSplitIframe} onCopied={markEmbedCopiedAction} />
+                  <Snippet label="Variation popup iframe" value={variationSplitIframe} onCopied={markEmbedCopiedAction} />
                 </div>
                 <p className="mt-4 text-sm leading-6 text-slate-600">
                   <Link href="/admin/split-tests#create-test" className="font-semibold text-primary hover:underline">
@@ -1204,12 +1232,15 @@ export default async function FunnelDetailPage({
             </CardContent>
           </Card>
         </section>
+      </FormPreviewPanel>
     </div>
   );
 }
 
 function actionSuccessMessage(saved?: string) {
   switch (saved) {
+    case "reactivated":
+      return FREEZE_COPY.reactivated;
     case "duplicated":
       return "Funnel duplicated. You are editing the new draft copy.";
     case "question-deleted":
@@ -1387,6 +1418,7 @@ function ActionError({ message }: { message: string }) {
     <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
       <p className="font-semibold">This setting was not saved.</p>
       <p>{message}</p>
+      <UpgradeHint message={message} />
     </div>
   );
 }
@@ -1940,19 +1972,26 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Snippet({ label, value }: { label: string; value: string }) {
+function Snippet({ label, value, onCopied }: { label: string; value: string; onCopied?: () => Promise<void> }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-slate-800">{label}</p>
-        <CopySnippetButton label={label} value={value} />
+        <CopySnippetButton label={label} value={value} onCopied={onCopied} />
       </div>
       <pre className="max-h-32 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs leading-5 text-white">{value}</pre>
     </div>
   );
 }
 
-function StatusBadge({ published }: { published: boolean }) {
+function StatusBadge({ published, frozen = false }: { published: boolean; frozen?: boolean }) {
+  if (!published && frozen) {
+    return (
+      <span className="rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700" title={FREEZE_COPY.badgeTitle}>
+        {FREEZE_COPY.badge}
+      </span>
+    );
+  }
   return (
     <span
       className={
@@ -2018,7 +2057,7 @@ function MetaPixelSettings({
           <option value="">No pixel</option>
           {pixels.map((pixel) => (
             <option key={pixel.id} value={pixel.id}>
-              {pixel.name} (pixel {pixel.dataset_id})
+              {pixel.name} (pixel {pixel.dataset_id}){pixel.frozen ? ` (${FREEZE_COPY.badge})` : ""}
             </option>
           ))}
         </select>

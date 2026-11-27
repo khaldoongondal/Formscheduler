@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 interface CopySnippetButtonProps {
   label: string;
   value: string;
+  /** Server action run after a successful copy (the editor marks the checklist step). Errors are ignored. */
+  onCopied?: () => Promise<void>;
 }
 
 async function copyToClipboard(value: string) {
@@ -26,13 +28,16 @@ async function copyToClipboard(value: string) {
   document.body.removeChild(textarea);
 }
 
-export function CopySnippetButton({ label, value }: CopySnippetButtonProps) {
+export function CopySnippetButton({ label, value, onCopied }: CopySnippetButtonProps) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
     await copyToClipboard(value);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
+    if (onCopied) {
+      onCopied().catch(() => undefined);
+    }
   }
 
   return (

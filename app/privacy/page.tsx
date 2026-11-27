@@ -3,7 +3,7 @@ import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-pag
 import { CONTACT_EMAIL } from "@/lib/billing/plans";
 
 export const metadata = {
-  title: "Privacy Policy | FormBook",
+  title: "Privacy Policy",
   description: "How FormBook, a tool from Gondal Tech, handles personal data."
 };
 
@@ -35,6 +35,13 @@ export default function PrivacyPage() {
             "follow up with you about Gondal Tech services. You can opt out of this at any time by emailing us."
           ]}
         />
+        <p>
+          We keep your account details in Gondal Tech&apos;s own CRM, which runs on GoHighLevel, to manage your account and
+          follow up with you. We send it your name, email address, phone number, business name and website, your plan, the
+          dates you reach steps such as verifying your email, connecting a tool, activating a form, and getting your first
+          lead or booking, and simple counts such as how many forms, Meta pixels, connections, leads and bookings your
+          account has. We never send the answers people give in your forms.
+        </p>
       </LegalSection>
 
       <LegalSection title="2. People who fill in a form">
@@ -53,7 +60,7 @@ export default function PrivacyPage() {
           items={[
             "Supabase: database and sign-in.",
             "Vercel: hosting.",
-            "GoHighLevel: the customer's own CRM and calendar, where leads and bookings are sent, and Gondal Tech's own CRM for account emails.",
+            "GoHighLevel: the customer's own CRM and calendar, where leads and bookings are sent, and Gondal Tech's own CRM for account emails and account management.",
             "Google Calendar, Cal.com and Calendly: only when a customer connects one of them as the calendar for a form. Bookings are created in the customer's own account.",
             "HubSpot: only when a customer connects it as the CRM for a form. Lead details are sent to the customer's own HubSpot account.",
             "Webhook addresses: when a customer chooses a webhook as the CRM for a form, FormBook sends lead details to the web address the customer chose.",

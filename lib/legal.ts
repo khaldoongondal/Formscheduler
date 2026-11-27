@@ -3,4 +3,4 @@
  * has reviewed /terms, /privacy and /dpa (release checklist step 10).
  */
 export const LEGAL_REVIEW_PENDING = true;
-export const LEGAL_LAST_UPDATED = "2026-11-26";
+export const LEGAL_LAST_UPDATED = "2026-11-27";

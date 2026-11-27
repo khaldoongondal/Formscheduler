@@ -1,9 +1,10 @@
 import { PublicError } from "@/lib/api/responses";
 import { parsePlanState } from "@/lib/billing/plans";
+import { FORM_NOT_AVAILABLE_MESSAGE } from "@/lib/funnels/public-copy";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Funnel } from "@/lib/types/database";
 
-export const FORM_NOT_AVAILABLE_MESSAGE = "This form is not available.";
+export { FORM_NOT_AVAILABLE_MESSAGE };
 
 /**
  * The one gate for every public write (analytics, lead sessions, slots,

@@ -11,7 +11,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Create your free account | FormBook"
+  title: "Create your free account"
 };
 
 async function hasTenantMembership(): Promise<boolean> {

@@ -63,6 +63,7 @@ export const STATUS_REASON_LABELS: Record<string, string> = {
   pixel_removed: "The pixel was removed.",
   pixel_detached: "The form no longer sends to this pixel, or the form or account is not active.",
   form_paused: "Waiting because the form is unpublished or the account is paused. It is sent once both are active again, within 7 days.",
+  pixel_frozen: "Waiting because this Meta pixel is frozen. It is sent if the pixel is reactivated within 7 days of the event.",
   consent_declined: "The visitor declined consent.",
   no_consent: "The visitor never answered the consent box.",
   token_unreadable: "The saved token could not be read.",

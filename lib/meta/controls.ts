@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { unstable_noStore as noStore } from "next/cache";
 import { after } from "next/server";
+import { FREEZE_COPY } from "@/lib/billing/freeze";
 import { drainMetaDeliveriesByIds } from "@/lib/meta/drain";
 import { buildMetaEventId, type PixelSwitches } from "@/lib/meta/events";
 import {
@@ -205,7 +206,8 @@ export async function fireHeldForLead(tenantId: string, leadSessionId: string, a
 /** Fire every held event of a pixel. Up to 20 go out right after the response; the cron sends the rest. */
 export async function fireAllHeld(tenantId: string, pixelId: string, actorEmail: string): Promise<number> {
   return guard("fire all failed", async () => {
-    await requirePixel(tenantId, pixelId);
+    const pixel = await requirePixel(tenantId, pixelId);
+    if (pixel.frozen) throw new UserFacingError(FREEZE_COPY.frozenPixelTest);
     const ids = await releaseHeld(tenantId, { pixelId, leadSessionId: null }, actorEmail);
     scheduleDrain(ids, DRAIN_NOW_LIMIT);
     return ids.length;
@@ -222,7 +224,8 @@ export async function sendTestEvent(
   request: { ip: string; userAgent: string }
 ): Promise<{ ok: boolean; message: string }> {
   return guard("test event failed", async () => {
-    await requirePixel(tenantId, pixelId);
+    const pixel = await requirePixel(tenantId, pixelId);
+    if (pixel.frozen) throw new UserFacingError(FREEZE_COPY.frozenPixelTest);
 
     let config;
     try {

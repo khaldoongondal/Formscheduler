@@ -3,12 +3,16 @@ import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-pag
 import { CONTACT_EMAIL, PLANS, formatPlanPrice } from "@/lib/billing/plans";
 
 export const metadata = {
-  title: "Terms of Service | FormBook",
+  title: "Terms of Service",
   description: "The terms for using FormBook, a tool from Gondal Tech."
 };
 
 const free = PLANS.free;
 const scaling = PLANS.scaling;
+
+function pixelText(count: number): string {
+  return `${count} Meta ${count === 1 ? "pixel" : "pixels"}`;
+}
 
 export default function TermsPage() {
   return (
@@ -47,14 +51,23 @@ export default function TermsPage() {
       <LegalSection title="3. Plans">
         <LegalList
           items={[
-            `${free.name}: ${formatPlanPrice(free)}. Up to ${free.maxActiveForms} active forms and ${free.maxDraftForms} drafts.`,
-            `${scaling.name}: ${formatPlanPrice(scaling)}. Up to ${scaling.maxActiveForms} active forms and ${scaling.maxDraftForms} drafts.`
+            `${free.name}: ${formatPlanPrice(free)}. Up to ${free.maxActiveForms} active forms, ${free.maxDraftForms} drafts and ${pixelText(free.maxPixels)}.`,
+            `${scaling.name}: ${formatPlanPrice(scaling)}. Up to ${scaling.maxActiveForms} active forms, ${scaling.maxDraftForms} drafts and ${pixelText(scaling.maxPixels)}.`
           ]}
         />
         <p>
-          Until online checkout launches, billing for the {scaling.name} plan is arranged directly with Gondal Tech.
-          We may change plan limits or prices. We will give you notice before a change affects your account. A change
-          never removes forms you already have; it can stop you from activating more until you are under the new limit.
+          The {scaling.name} plan is billed monthly through a Gondal Tech payment page. You can cancel from the Manage
+          billing link on your Plan page or by emailing us; your account then moves to the {free.name} plan at the end
+          of the paid period. We may change plan limits or prices and will give you notice before a change affects
+          your account. When your account moves to a plan with lower limits, nothing is deleted: forms and Meta pixels
+          above the new limits are frozen and stop taking leads and sending events until you upgrade or choose which
+          ones stay active.
+        </p>
+        <p>
+          Refunds: if you ask for a refund, your {scaling.name} plan ends straight away and your account moves to the{" "}
+          {free.name} plan. We refund the amount you paid for the current billing period minus a charge for the days
+          already used. The charge for each day is the monthly price divided by the number of days in that billing
+          period. We issue the refund to the card or account you paid with.
         </p>
       </LegalSection>
 

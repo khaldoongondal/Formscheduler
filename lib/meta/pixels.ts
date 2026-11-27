@@ -19,10 +19,26 @@ import type { MetaPixel } from "@/lib/types/database";
  * it. The encrypted token is read only by loadPixelSendConfig, for sending.
  */
 
-export type PixelSummary = Omit<MetaPixel, "access_token_ciphertext">;
+export type PixelSummary = Omit<MetaPixel, "access_token_ciphertext"> & {
+  /** Frozen by a plan change (migration 0032); false before it is applied. */
+  frozen: boolean;
+};
 
 export const PIXEL_SUMMARY_COLUMNS =
   "id,tenant_id,name,dataset_id,token_last_four,test_event_code,sending_mode,send_form_view,send_form_start,send_lead,send_qualified_lead,send_disqualified_lead,send_booked_call,last_test_at,last_test_ok,last_test_summary,created_at,updated_at";
+
+type DbResult = { data: unknown; error: { message: string; code?: string } | null };
+
+/** Runs a pixel read with frozen_at, and again without it when migration 0032 is missing. */
+async function selectWithFrozen(run: (columns: string) => PromiseLike<DbResult>): Promise<DbResult> {
+  const first = await run(`${PIXEL_SUMMARY_COLUMNS},frozen_at`);
+  if (first.error?.code !== "42703") return first;
+  return run(PIXEL_SUMMARY_COLUMNS);
+}
+
+function toSummary(row: Record<string, unknown>): PixelSummary {
+  return { ...(row as unknown as Omit<MetaPixel, "access_token_ciphertext">), frozen: Boolean(row.frozen_at) };
+}
 
 const GENERIC_MESSAGE = "Something went wrong. Please try again.";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,27 +86,22 @@ function dbError(error: { message: string; code?: string }) {
 export async function listPixels(tenantId: string): Promise<PixelSummary[]> {
   noStore();
   const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from("meta_pixels")
-    .select(PIXEL_SUMMARY_COLUMNS)
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: true });
+  const { data, error } = await selectWithFrozen((columns) =>
+    supabase.from("meta_pixels").select(columns).eq("tenant_id", tenantId).order("created_at", { ascending: true })
+  );
   if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as PixelSummary[];
+  return ((data ?? []) as Array<Record<string, unknown>>).map(toSummary);
 }
 
 export async function getPixel(tenantId: string, pixelId: string): Promise<PixelSummary | null> {
   noStore();
   if (!isUuid(pixelId)) return null;
   const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from("meta_pixels")
-    .select(PIXEL_SUMMARY_COLUMNS)
-    .eq("tenant_id", tenantId)
-    .eq("id", pixelId)
-    .maybeSingle();
+  const { data, error } = await selectWithFrozen((columns) =>
+    supabase.from("meta_pixels").select(columns).eq("tenant_id", tenantId).eq("id", pixelId).maybeSingle()
+  );
   if (error) throw new Error(error.message);
-  return (data as unknown as PixelSummary | null) ?? null;
+  return data ? toSummary(data as Record<string, unknown>) : null;
 }
 
 export async function getTenantPixelCount(tenantId: string): Promise<number> {
@@ -99,6 +110,19 @@ export async function getTenantPixelCount(tenantId: string): Promise<number> {
     .from("meta_pixels")
     .select("id", { count: "exact", head: true })
     .eq("tenant_id", tenantId);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+/** Pixels the limit counts (not frozen); every pixel before migration 0032. */
+export async function getTenantUnfrozenPixelCount(tenantId: string): Promise<number> {
+  const supabase = createServiceClient();
+  const { count, error } = await supabase
+    .from("meta_pixels")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .is("frozen_at", null);
+  if (error?.code === "42703") return getTenantPixelCount(tenantId);
   if (error) throw new Error(error.message);
   return count ?? 0;
 }
@@ -129,7 +153,7 @@ export async function listFormsByPixel(
 export async function createPixel(tenantId: string, input: unknown): Promise<string> {
   return run(tenantId, async () => {
     const parsed = pixelCreateSchema.parse(input);
-    const [state, count] = await Promise.all([getTenantPlanState(tenantId), getTenantPixelCount(tenantId)]);
+    const [state, count] = await Promise.all([getTenantPlanState(tenantId), getTenantUnfrozenPixelCount(tenantId)]);
     const limit = checkPixelLimit(state, count);
     if (!limit.allowed) throw new UserFacingError(limit.message);
 
@@ -194,7 +218,12 @@ export type PixelSendConfig = {
   testEventCode: string | null;
   sendingMode: SendingMode;
   switches: PixelSwitches;
+  /** Frozen by a plan change: queued rows wait and nothing is sent (false or missing before migration 0032). */
+  frozen?: boolean;
 };
+
+const SEND_CONFIG_COLUMNS =
+  "id,tenant_id,dataset_id,access_token_ciphertext,test_event_code,sending_mode,send_form_view,send_form_start,send_lead,send_qualified_lead,send_disqualified_lead,send_booked_call";
 
 /**
  * Server only: the decrypted config for sending. Null when the pixel no
@@ -203,13 +232,15 @@ export type PixelSendConfig = {
 export async function loadPixelSendConfig(pixelId: string): Promise<PixelSendConfig | null> {
   if (!isUuid(pixelId)) return null;
   const supabase = createServiceClient();
-  const { data, error } = await supabase
+  let result: DbResult = await supabase
     .from("meta_pixels")
-    .select(
-      "id,tenant_id,dataset_id,access_token_ciphertext,test_event_code,sending_mode,send_form_view,send_form_start,send_lead,send_qualified_lead,send_disqualified_lead,send_booked_call"
-    )
+    .select(`${SEND_CONFIG_COLUMNS},frozen_at`)
     .eq("id", pixelId)
     .maybeSingle();
+  if (result.error?.code === "42703") {
+    result = await supabase.from("meta_pixels").select(SEND_CONFIG_COLUMNS).eq("id", pixelId).maybeSingle();
+  }
+  const { data, error } = result;
   if (error) throw new Error(error.message);
   if (!data) return null;
   const row = data as unknown as MetaPixel;
@@ -235,6 +266,7 @@ export async function loadPixelSendConfig(pixelId: string): Promise<PixelSendCon
       send_qualified_lead: row.send_qualified_lead,
       send_disqualified_lead: row.send_disqualified_lead,
       send_booked_call: row.send_booked_call
-    }
+    },
+    frozen: Boolean(row.frozen_at)
   };
 }

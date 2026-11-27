@@ -1,4 +1,7 @@
+import { PublicError } from "@/lib/api/responses";
 import { findUserIdByEmail } from "@/lib/auth/users";
+import { normalizeAccountRef } from "@/lib/billing/account-ref";
+import { applyPlanChange, type AppliedPlanChange } from "@/lib/billing/plan-change-service";
 import { parsePlanState, type PlanState } from "@/lib/billing/plans";
 import { resolveProvisionPlanChange } from "@/lib/provisioning/plan-change";
 import { randomSuffix } from "@/lib/security/random";
@@ -6,6 +9,12 @@ import { createServiceClient } from "@/lib/supabase/server";
 import type { Tenant } from "@/lib/types/database";
 
 const SLUG_SUFFIX_LENGTH = 6;
+
+/** The actor recorded in plan history for /api/provision calls. */
+export const PROVISION_ACTOR = "billing automation";
+
+/** What a provision plan change did (frozen and restored counts); null when nothing changed. */
+export type ProvisionPlanChangeSummary = Omit<AppliedPlanChange, "historyId">;
 
 export type ProvisionResult = {
   tenant_id: string;
@@ -19,6 +28,20 @@ export type ProvisionResult = {
    * welcome email instead of relying on a Supabase-sent email.
    */
   login_link: string;
+  /** Opaque account reference (null before migration 0032). */
+  account_ref: string | null;
+  plan_change: ProvisionPlanChangeSummary | null;
+};
+
+export type ProvisionRefResult = {
+  tenant_id: string;
+  user_id: null;
+  user_created: false;
+  tenant_created: false;
+  plan: PlanState;
+  login_link: null;
+  account_ref: string;
+  plan_change: ProvisionPlanChangeSummary | null;
 };
 
 function slugify(value: string) {
@@ -114,46 +137,20 @@ export async function provisionTenant(input: {
     // Repeat call for an existing customer: treat it as a plan change
     // (upgrade, downgrade, lapse or renewal from the sales-side automation),
     // keeping the suspension fields in step with the plan.
-    let resultingPlan: PlanState = plan;
-    if (input.plan) {
-      const { data: current, error: currentError } = await supabase
-        .from("tenants")
-        .select("plan,plan_before_suspension,suspended_at,suspension_reason")
-        .eq("id", existingMember.tenant_id)
-        .maybeSingle();
-      if (currentError) throw new Error(currentError.message);
-      if (!current) throw new Error("Tenant not found.");
-
-      const change = resolveProvisionPlanChange(
-        {
-          plan: parsePlanState(current.plan),
-          plan_before_suspension: current.plan_before_suspension ?? null,
-          suspended_at: current.suspended_at ?? null,
-          suspension_reason: current.suspension_reason ?? null
-        },
-        plan,
-        new Date().toISOString()
-      );
-      if (change.keptOwnerSuspension) {
-        console.info("[provision] plan change kept an owner suspension in place");
-      }
-      if (change.update) {
-        const { error: planError } = await supabase
-          .from("tenants")
-          .update(change.update)
-          .eq("id", existingMember.tenant_id);
-        if (planError) throw new Error(planError.message);
-      }
-      resultingPlan = change.resultingPlan;
-    }
+    const tenantId = existingMember.tenant_id;
+    const { plan: resultingPlan, planChange } = input.plan
+      ? await applyProvisionPlan(tenantId, plan)
+      : { plan, planChange: null };
 
     return {
-      tenant_id: existingMember.tenant_id,
+      tenant_id: tenantId,
       user_id: userId,
       user_created: userCreated,
       tenant_created: false,
       plan: resultingPlan,
-      login_link: loginLink
+      login_link: loginLink,
+      account_ref: await readAccountRef(tenantId),
+      plan_change: planChange
     };
   }
 
@@ -179,12 +176,106 @@ export async function provisionTenant(input: {
 
   if (memberError) throw new Error(memberError.message);
 
+  if (plan !== "free") await recordProvisionedPlan(tenant.id, plan);
+
   return {
     tenant_id: tenant.id,
     user_id: userId,
     user_created: userCreated,
     tenant_created: true,
     plan,
-    login_link: loginLink
+    login_link: loginLink,
+    account_ref: await readAccountRef(tenant.id),
+    plan_change: null
   };
+}
+
+/**
+ * Plan change by the opaque account reference (the GoHighLevel checkout and
+ * subscription workflows send it). Never creates or touches an auth user or a
+ * tenant: an unknown reference is a 404.
+ */
+export async function provisionByAccountRef(input: { account_ref: string; plan?: PlanState }): Promise<ProvisionRefResult> {
+  const ref = normalizeAccountRef(input.account_ref);
+  if (!ref) throw new PublicError("Account not found.", 404);
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.from("tenants").select("id,plan").eq("account_ref", ref).maybeSingle();
+  if (error) {
+    // 42703: migration 0032 is not applied, so no reference can match.
+    if (error.code === "42703") throw new PublicError("Account not found.", 404);
+    throw new Error(error.message);
+  }
+  if (!data) throw new PublicError("Account not found.", 404);
+
+  const { plan, planChange } = input.plan
+    ? await applyProvisionPlan(data.id, input.plan)
+    : { plan: parsePlanState(data.plan), planChange: null };
+
+  return {
+    tenant_id: data.id,
+    user_id: null,
+    user_created: false,
+    tenant_created: false,
+    plan,
+    login_link: null,
+    account_ref: ref,
+    plan_change: planChange
+  };
+}
+
+/** The shared provision plan change: applyPlanChange with the automation's rules. */
+async function applyProvisionPlan(
+  tenantId: string,
+  requested: PlanState
+): Promise<{ plan: PlanState; planChange: ProvisionPlanChangeSummary | null }> {
+  let resultingPlan: PlanState = requested;
+  let keptOwnerSuspension = false;
+  const applied = await applyPlanChange({
+    tenantId,
+    resolve: (current) => {
+      const change = resolveProvisionPlanChange(current, requested, new Date().toISOString());
+      resultingPlan = change.resultingPlan;
+      keptOwnerSuspension = change.keptOwnerSuspension;
+      return change;
+    },
+    source: "provision",
+    actor: PROVISION_ACTOR,
+    note: null
+  });
+  if (keptOwnerSuspension) {
+    console.info("[provision] plan change kept an owner suspension in place");
+  }
+  if (!applied.changed) return { plan: resultingPlan, planChange: null };
+  const { historyId: _historyId, ...summary } = applied;
+  void _historyId;
+  return { plan: resultingPlan, planChange: summary };
+}
+
+/** History row for a tenant created on a paid plan (errors are logged, never thrown). */
+async function recordProvisionedPlan(tenantId: string, plan: PlanState) {
+  try {
+    const supabase = createServiceClient();
+    const { error } = await supabase.from("tenant_plan_changes").insert({
+      tenant_id: tenantId,
+      from_plan: null,
+      to_plan: plan,
+      source: "provision",
+      actor: PROVISION_ACTOR
+    });
+    if (error) console.error("[provision] plan history write failed:", error.code ?? "error");
+  } catch {
+    console.error("[provision] plan history write failed");
+  }
+}
+
+/** The tenant's account reference, or null before migration 0032. */
+async function readAccountRef(tenantId: string): Promise<string | null> {
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.from("tenants").select("account_ref").eq("id", tenantId).maybeSingle();
+    if (error || !data) return null;
+    return normalizeAccountRef((data as { account_ref?: unknown }).account_ref);
+  } catch {
+    return null;
+  }
 }

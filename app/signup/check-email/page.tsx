@@ -9,7 +9,7 @@ import { RESEND_RATE_LIMITED_MESSAGE } from "@/lib/validation/signup";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Check your email | FormBook"
+  title: "Check your email"
 };
 
 const RESEND_ERRORS = new Set([RESEND_RATE_LIMITED_MESSAGE]);

@@ -48,6 +48,41 @@ export interface Tenant {
   plan_before_suspension: "free" | "scaling" | null;
   suspended_at: string | null;
   suspension_reason: string | null;
+  /** Opaque account reference "fba_" + 24 hex (migration 0032); undefined before it is applied. */
+  account_ref?: string;
+  /** Milestones set once by the lifecycle triggers (migration 0034); undefined before it is applied. */
+  first_connection_at?: string | null;
+  first_form_activated_at?: string | null;
+  first_lead_at?: string | null;
+  first_booking_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TenantPlanChange {
+  id: string;
+  tenant_id: string;
+  from_plan: "free" | "scaling" | "suspended" | null;
+  to_plan: "free" | "scaling" | "suspended";
+  source: "provision" | "owner";
+  actor: string | null;
+  note: string | null;
+  frozen_forms: number;
+  frozen_pixels: number;
+  restored_forms: number;
+  restored_pixels: number;
+  ended_split_tests: number;
+  details: Json;
+  created_at: string;
+}
+
+/** Onboarding steps without another trace and the two dismissals (migration 0033). */
+export interface TenantOnboarding {
+  tenant_id: string;
+  preview_opened_at: string | null;
+  embed_copied_at: string | null;
+  checklist_hidden_at: string | null;
+  setup_call_dismissed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -141,6 +176,10 @@ export interface Funnel {
   crm_connection_id?: string | null;
   calendar_settings?: Json;
   crm_settings?: Json;
+  /** Set when a plan change froze this form (migration 0032). A frozen form is never published. */
+  frozen_at?: string | null;
+  /** Starter template the form was created from (migration 0033); null for blank forms. */
+  template_key?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -351,6 +390,52 @@ export interface CrmEventDelivery {
   updated_at: string;
 }
 
+export type LifecycleDeliveryEvent =
+  | "signup_verified"
+  | "first_connection_added"
+  | "first_form_activated"
+  | "first_lead"
+  | "first_booking"
+  | "plan_changed"
+  | "account_suspended"
+  | "account_restored"
+  | "test_ping";
+
+/** Account lifecycle event queued for the owner's CRM (migration 0034). Holds no contact data. */
+export interface LifecycleEventDelivery {
+  id: string;
+  tenant_id: string;
+  event: LifecycleDeliveryEvent;
+  dedupe_key: string;
+  occurred_at: string;
+  details: Json;
+  status: "pending" | "sent" | "failed" | "skipped";
+  status_reason: string | null;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  response_status: number | null;
+  last_error: string | null;
+  sent_at: string | null;
+  settled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OwnerActivationRow {
+  tenant_id: string;
+  signup_source: string;
+  plan: string;
+  created_at: string;
+  first_connection_at: string | null;
+  first_form_activated_at: string | null;
+  first_lead_at: string | null;
+  first_booking_at: string | null;
+  ever_scaling: boolean;
+}
+
 export interface AnalyticsEvent {
   id: string;
   tenant_id: string;
@@ -381,6 +466,8 @@ export interface SplitTest {
   ended_at: string | null;
   /** Set on demo tests made by scripts/seed-demo.mjs (migration 0028). */
   demo_seed_batch?: string | null;
+  /** Why the test ended automatically (migration 0032). */
+  end_reason?: "form_frozen" | null;
   created_at: string;
   updated_at: string;
 }
@@ -429,6 +516,8 @@ export interface MetaPixel {
   last_test_at: string | null;
   last_test_ok: boolean | null;
   last_test_summary: string | null;
+  /** Set when a plan change froze this pixel (migration 0032). */
+  frozen_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -600,6 +689,26 @@ export interface OwnerClientListRow {
   created_at: string;
 }
 
+export interface TenantFormActivityRow {
+  funnel_id: string;
+  name: string;
+  is_published: boolean;
+  frozen_at: string | null;
+  taken_down_at: string | null;
+  updated_at: string;
+  meta_pixel_id: string | null;
+  last_lead_at: string | null;
+  created_at: string;
+}
+
+export interface TenantPixelActivityRow {
+  pixel_id: string;
+  name: string;
+  frozen_at: string | null;
+  created_at: string;
+  last_event_at: string | null;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -626,6 +735,9 @@ export interface Database {
       meta_event_deliveries: Table<MetaEventDelivery>;
       connections: Table<Connection>;
       crm_event_deliveries: Table<CrmEventDelivery>;
+      tenant_plan_changes: Table<TenantPlanChange>;
+      tenant_onboarding: Table<TenantOnboarding>;
+      lifecycle_event_deliveries: Table<LifecycleEventDelivery>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -738,6 +850,90 @@ export interface Database {
       split_test_replace_members: {
         Args: { p_tenant_id: string; p_test_id: string; p_funnel_ids: string[] };
         Returns: undefined;
+      };
+      apply_tenant_plan_change: {
+        Args: {
+          p_tenant_id: string;
+          p_expected_plan: string;
+          p_plan: string;
+          p_plan_before_suspension: string | null;
+          p_suspended_at: string | null;
+          p_suspension_reason: string | null;
+          p_form_keep_order: string[];
+          p_pixel_keep_order: string[];
+          p_restorable_form_ids: string[];
+          p_source: "provision" | "owner";
+          p_actor: string | null;
+          p_note: string | null;
+        };
+        Returns: Json;
+      };
+      swap_frozen_form: {
+        Args: { p_tenant_id: string; p_freeze_id: string; p_restore_id: string };
+        Returns: Json;
+      };
+      tenant_form_activity: {
+        Args: { p_tenant_id: string };
+        Returns: TenantFormActivityRow[];
+      };
+      mark_tenant_onboarding: {
+        Args: {
+          p_tenant_id: string;
+          p_field: "preview_opened_at" | "embed_copied_at" | "checklist_hidden_at" | "setup_call_dismissed_at";
+          p_clear?: boolean;
+        };
+        Returns: undefined;
+      };
+      tenant_pixel_activity: {
+        Args: { p_tenant_id: string };
+        Returns: TenantPixelActivityRow[];
+      };
+      enqueue_lifecycle_event: {
+        Args: { p_tenant_id: string; p_event: LifecycleDeliveryEvent; p_dedupe_key: string; p_details?: Json; p_occurred_at?: string };
+        Returns: string | null;
+      };
+      claim_lifecycle_deliveries: {
+        Args: { p_owner: string; p_limit?: number; p_lease_seconds?: number };
+        Returns: LifecycleEventDelivery[];
+      };
+      claim_lifecycle_deliveries_by_ids: {
+        Args: { p_ids: string[]; p_owner: string; p_lease_seconds?: number };
+        Returns: LifecycleEventDelivery[];
+      };
+      settle_lifecycle_delivery: {
+        Args: {
+          p_id: string;
+          p_owner: string;
+          p_outcome: "sent" | "retry" | "failed" | "skipped";
+          p_status?: number | null;
+          p_error?: string | null;
+          p_reason?: string | null;
+        };
+        Returns: boolean;
+      };
+      release_lifecycle_delivery: {
+        Args: { p_id: string; p_owner: string };
+        Returns: boolean;
+      };
+      lifecycle_housekeeping: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
+      lifecycle_tenant_snapshot: {
+        Args: { p_tenant_id: string };
+        Returns: Json;
+      };
+      owner_activation_rows: {
+        Args: Record<string, never>;
+        Returns: OwnerActivationRow[];
+      };
+      owner_pending_signups: {
+        Args: Record<string, never>;
+        Returns: Array<{ created_at: string }>;
+      };
+      owner_lifecycle_status: {
+        Args: Record<string, never>;
+        Returns: Json;
       };
     };
     Enums: {

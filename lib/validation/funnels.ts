@@ -73,11 +73,13 @@ export const createFunnelSchema = z.object({
   analytics_target_country_codes: z.array(z.string()).optional(),
   analytics_traffic_sources: z.array(z.string()).optional(),
   opportunity_name_template: z.string().min(2).max(200).default("{{lead_name}}"),
-  theme: funnelThemeSchema
+  theme: funnelThemeSchema,
+  /** Starter template the form is created from (migration 0033). Create only. */
+  template_key: z.string().regex(/^[a-z_]{2,40}$/).optional()
 });
 
 export const updateFunnelSchema = createFunnelSchema
-  .omit({ tenant_id: true })
+  .omit({ tenant_id: true, template_key: true })
   .partial()
   .extend({
     id: z.string().uuid(),

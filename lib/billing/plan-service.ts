@@ -9,6 +9,7 @@ import {
   type PlanDefinition,
   type PlanState
 } from "@/lib/billing/plans";
+import { normalizeAccountRef } from "@/lib/billing/account-ref";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export async function getTenantPlanState(tenantId: string): Promise<PlanState> {
@@ -30,24 +31,70 @@ export async function isTenantSuspended(tenantId: string): Promise<boolean> {
   return (await getTenantPlanState(tenantId)) === "suspended";
 }
 
-/** Counts the tenant's active and draft forms, optionally leaving one form out. */
+/**
+ * Counts the tenant's active and draft forms, optionally leaving one form out.
+ * Frozen forms (migration 0032) are not drafts; before 0032 every unpublished
+ * form counts as a draft.
+ */
 export async function getTenantFormUsage(tenantId: string, excludeFunnelId?: string): Promise<FormUsage> {
   const supabase = createServiceClient();
 
-  const countForms = async (published: boolean) => {
+  const countForms = async (published: boolean, skipFrozen: boolean) => {
     let query = supabase
       .from("funnels")
       .select("id", { count: "exact", head: true })
       .eq("tenant_id", tenantId)
       .eq("is_published", published);
+    if (skipFrozen) query = query.is("frozen_at", null);
     if (excludeFunnelId) query = query.neq("id", excludeFunnelId);
     const { count, error } = await query;
-    if (error) throw new Error(error.message);
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
     return count ?? 0;
   };
 
-  const [activeForms, draftForms] = await Promise.all([countForms(true), countForms(false)]);
+  const countDrafts = async () => {
+    try {
+      return await countForms(false, true);
+    } catch (error) {
+      if ((error as { code?: string }).code === "42703") return countForms(false, false);
+      throw error;
+    }
+  };
+
+  const [activeForms, draftForms] = await Promise.all([countForms(true, false), countDrafts()]);
   return { activeForms, draftForms };
+}
+
+/** Frozen forms and pixels of the tenant; zeros when migration 0032 is not applied yet. */
+export async function countFrozen(tenantId: string): Promise<{ forms: number; pixels: number }> {
+  const supabase = createServiceClient();
+  const count = async (table: "funnels" | "meta_pixels") => {
+    try {
+      const { count: value, error } = await supabase
+        .from(table)
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .not("frozen_at", "is", null);
+      if (error) return 0;
+      return value ?? 0;
+    } catch {
+      return 0;
+    }
+  };
+  const [forms, pixels] = await Promise.all([count("funnels"), count("meta_pixels")]);
+  return { forms, pixels };
+}
+
+/** The tenant's opaque account reference, or null before migration 0032. */
+export async function getTenantAccountRef(tenantId: string): Promise<string | null> {
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.from("tenants").select("account_ref").eq("id", tenantId).maybeSingle();
+    if (error || !data) return null;
+    return normalizeAccountRef((data as { account_ref?: unknown }).account_ref);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -68,15 +115,36 @@ export async function assertFormLimit(
   if (!result.allowed) throw new Error(result.message);
 }
 
-export async function getTenantPlanSummary(
-  tenantId: string
-): Promise<{ state: PlanState; plan: PlanDefinition | null; usage: FormUsage; pixelCount: number | null }> {
-  const [state, usage, pixelCount] = await Promise.all([
+export type TenantPlanSummary = {
+  state: PlanState;
+  plan: PlanDefinition | null;
+  usage: FormUsage;
+  /** Every Meta pixel, frozen ones included (null when the table is missing). */
+  pixelCount: number | null;
+  /** Pixels that are not frozen: what the pixel limit counts (null when the table is missing). */
+  unfrozenPixelCount: number | null;
+  frozen: { forms: number; pixels: number };
+  accountRef: string | null;
+};
+
+export async function getTenantPlanSummary(tenantId: string): Promise<TenantPlanSummary> {
+  const [state, usage, pixelCount, frozen, accountRef] = await Promise.all([
     getTenantPlanState(tenantId),
     getTenantFormUsage(tenantId),
-    countTenantPixels(tenantId)
+    countTenantPixels(tenantId),
+    countFrozen(tenantId),
+    getTenantAccountRef(tenantId)
   ]);
-  return { state, plan: state === "suspended" ? null : PLANS[state], usage, pixelCount };
+  const unfrozenPixelCount = pixelCount === null ? null : Math.max(0, pixelCount - frozen.pixels);
+  return {
+    state,
+    plan: state === "suspended" ? null : PLANS[state],
+    usage,
+    pixelCount,
+    unfrozenPixelCount,
+    frozen,
+    accountRef
+  };
 }
 
 /** Meta pixels of the tenant; null when the table is missing (migration 0027 not run yet). */

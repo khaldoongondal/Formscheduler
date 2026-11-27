@@ -9,7 +9,7 @@ import { LINK_EXPIRED_MESSAGE, isEmailOtpType } from "@/lib/validation/signup";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Confirm | FormBook",
+  title: "Confirm",
   referrer: "no-referrer",
   robots: { index: false, follow: false }
 };

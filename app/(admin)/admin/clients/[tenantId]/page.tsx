@@ -13,14 +13,24 @@ import { OwnerNotices, PlanPill, ownerInputClass } from "@/app/(admin)/admin/cli
 import { requirePlatformOwner } from "@/lib/auth/owner-server";
 import { PLANS, PLAN_IDS, formatPlanPrice, shouldShowBadge } from "@/lib/billing/plans";
 import { getMissingSupabaseAdminEnv } from "@/lib/env";
-import { clientFormStatus, formatOwnerDate, planDowngradeWarning } from "@/lib/owner/format";
-import { getClientDetail } from "@/lib/owner/service";
+import { previewFreeze } from "@/lib/billing/freeze";
+import { ACTIVATION_COPY, planHistoryEffect } from "@/lib/owner/activation";
+import {
+  clientFormStatus,
+  formatOwnerDate,
+  parsePlanChangeParams,
+  pixelDowngradeWarning,
+  planDowngradeWarning,
+  planStateLabel,
+  wouldFreezeLine
+} from "@/lib/owner/format";
+import { getClientDetail, getClientMilestones, listPlanHistory } from "@/lib/owner/service";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Client | FormBook", robots: { index: false } };
+export const metadata = { title: "Client", robots: { index: false } };
 
 const SIGNUP_SOURCE_LABELS: Record<string, string> = {
   legacy: "Before self-serve signup",
@@ -43,7 +53,7 @@ export default async function ClientDetailPage({
   searchParams
 }: {
   params: Promise<{ tenantId: string }>;
-  searchParams?: Promise<{ saved?: string; error?: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requirePlatformOwner();
 
@@ -62,14 +72,23 @@ export default async function ClientDetailPage({
   const detail = await getClientDetail(tenantId);
   if (!detail) notFound();
 
-  const { client, tenant, forms } = detail;
+  const { client, tenant, forms, formActivity, pixelActivity, accountRef } = detail;
   const query = searchParams ? await searchParams : {};
+  const [history, milestones] = await Promise.all([listPlanHistory(client.tenantId), getClientMilestones(client.tenantId)]);
   const returnTo = `/admin/clients/${client.tenantId}`;
   const isSuspended = client.plan === "suspended";
   const currentPlanId = isSuspended ? (tenant.plan_before_suspension ?? "free") : client.plan === "scaling" ? "scaling" : "free";
-  const planWarnings = PLAN_IDS.map((id) => planDowngradeWarning(id, client.activeForms)).filter(
-    (warning): warning is string => Boolean(warning)
-  );
+  const unfrozenPixels = pixelActivity.filter((pixel) => !pixel.frozenAt).length;
+  // Downgrade warnings with the names that would freeze (decision D8 ranking).
+  const planWarnings = PLAN_IDS.flatMap((id) => {
+    const preview = previewFreeze(formActivity, pixelActivity, id);
+    const items: Array<{ key: string; text: string; names: string | null }> = [];
+    const formWarning = planDowngradeWarning(id, client.activeForms);
+    if (formWarning) items.push({ key: `${id}-forms`, text: formWarning, names: wouldFreezeLine(preview.formNames) });
+    const pixelWarning = pixelDowngradeWarning(id, unfrozenPixels);
+    if (pixelWarning) items.push({ key: `${id}-pixels`, text: pixelWarning, names: wouldFreezeLine(preview.pixelNames) });
+    return items;
+  });
   const websiteHref = safeWebsiteHref(tenant.website);
   const badgeVisible = shouldShowBadge(client.plan, client.badgeEnabled);
 
@@ -94,6 +113,7 @@ export default async function ClientDetailPage({
       <OwnerNotices
         saved={typeof query.saved === "string" ? query.saved : undefined}
         error={typeof query.error === "string" ? query.error : undefined}
+        counts={parsePlanChangeParams(query)}
       />
 
       <Section title="Profile">
@@ -118,6 +138,12 @@ export default async function ClientDetailPage({
           <ProfileItem label="Signup source" value={SIGNUP_SOURCE_LABELS[tenant.signup_source] ?? tenant.signup_source} />
           <ProfileItem label="Created" value={formatOwnerDate(tenant.created_at)} />
           <ProfileItem label="Last activity" value={formatOwnerDate(client.lastActivityAt)} />
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{ACTIVATION_COPY.accountRef}</dt>
+            <dd className="mt-0.5 break-all text-slate-900">
+              {accountRef ? <span className="font-mono text-sm">{accountRef}</span> : "None"}
+            </dd>
+          </div>
         </dl>
       </Section>
 
@@ -141,10 +167,67 @@ export default async function ClientDetailPage({
           <p className="mt-3 text-sm text-slate-600">Saving a plan also restores this suspended account.</p>
         ) : null}
         {planWarnings.map((warning) => (
-          <p key={warning} className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {warning}
-          </p>
+          <div key={warning.key} className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p>{warning.text}</p>
+            {warning.names ? <p className="mt-1 break-words text-xs">{warning.names}</p> : null}
+          </div>
         ))}
+      </Section>
+
+      <Section title={ACTIVATION_COPY.milestonesTitle}>
+        <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+          {[
+            { label: "Signed up", value: milestones.createdAt ?? tenant.created_at },
+            { label: ACTIVATION_COPY.steps.connected, value: milestones.firstConnectionAt },
+            { label: ACTIVATION_COPY.steps.first_active_form, value: milestones.firstFormActivatedAt },
+            { label: ACTIVATION_COPY.steps.first_lead, value: milestones.firstLeadAt },
+            { label: ACTIVATION_COPY.steps.first_booking, value: milestones.firstBookingAt }
+          ].map((item) => (
+            <ProfileItem key={item.label} label={item.label} value={item.value ? formatOwnerDate(item.value) : "Not yet"} />
+          ))}
+        </dl>
+        <p className="mt-3 text-xs text-slate-500">{ACTIVATION_COPY.backfillNote}</p>
+      </Section>
+
+      <Section title={ACTIVATION_COPY.historyTitle}>
+        {history.length === 0 ? (
+          <p className="text-sm text-slate-600">{ACTIVATION_COPY.historyEmpty}</p>
+        ) : (
+          <div className="-mx-5 overflow-x-auto px-5">
+            <table className="w-full min-w-[40rem] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="py-2 pr-4 font-semibold">{ACTIVATION_COPY.historyColumns.when}</th>
+                  <th className="py-2 pr-4 font-semibold">{ACTIVATION_COPY.historyColumns.change}</th>
+                  <th className="py-2 pr-4 font-semibold">{ACTIVATION_COPY.historyColumns.by}</th>
+                  <th className="py-2 pr-4 font-semibold">{ACTIVATION_COPY.historyColumns.effect}</th>
+                  <th className="py-2 font-semibold">{ACTIVATION_COPY.historyColumns.note}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {history.map((row) => (
+                  <tr key={row.id} className="align-top">
+                    <td className="py-2 pr-4 text-slate-600">{formatOwnerDate(row.createdAt)}</td>
+                    <td className="py-2 pr-4 font-medium text-slate-950">
+                      {row.fromPlan
+                        ? `${planStateLabel(row.fromPlan)} to ${planStateLabel(row.toPlan)}`
+                        : `New account on ${planStateLabel(row.toPlan)}`}
+                    </td>
+                    <td className="break-words py-2 pr-4 text-slate-700">
+                      {row.source === "owner"
+                        ? row.actor
+                          ? `${ACTIVATION_COPY.bySource.owner} (${row.actor})`
+                          : ACTIVATION_COPY.bySource.owner
+                        : ACTIVATION_COPY.bySource.provision}
+                    </td>
+                    <td className="py-2 pr-4 text-slate-700">{planHistoryEffect(row)}</td>
+                    <td className="break-words py-2 text-slate-600">{row.note ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Section>
 
       <Section title={'Show "Powered by FormBook" badge'}>
@@ -278,6 +361,8 @@ function FormStatusBadge({ status }: { status: ReturnType<typeof clientFormStatu
       ? "bg-red-100 text-red-800"
       : status === "Active"
         ? "bg-emerald-100 text-emerald-800"
-        : "bg-slate-100 text-slate-700";
+        : status === "Frozen"
+          ? "bg-sky-50 text-sky-700"
+          : "bg-slate-100 text-slate-700";
   return <span className={`mr-1 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${tone}`}>{status}</span>;
 }

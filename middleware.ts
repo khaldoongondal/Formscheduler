@@ -7,7 +7,9 @@ export async function middleware(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!request.nextUrl.pathname.startsWith("/admin")) {
+  const pathname = request.nextUrl.pathname;
+  // The in-editor form preview is signed-in only, like the admin pages.
+  if (!pathname.startsWith("/admin") && !pathname.startsWith("/preview/")) {
     return NextResponse.next();
   }
 
@@ -63,5 +65,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*"]
+  matcher: ["/admin/:path*", "/preview/:path*"]
 };

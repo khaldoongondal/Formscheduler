@@ -9,7 +9,10 @@ import {
   updatePixelAction
 } from "@/app/(admin)/admin/pixels/actions";
 import { TestResultAlert, formatEventTime } from "@/app/(admin)/admin/pixels/delivery-ui";
-import { PIXEL_COPY, PIXEL_SAVED_MESSAGES, PixelFields } from "@/app/(admin)/admin/pixels/pixel-ui";
+import { FrozenPixelBadge, PIXEL_COPY, PIXEL_SAVED_MESSAGES, PixelFields } from "@/app/(admin)/admin/pixels/pixel-ui";
+import { reactivateFrozenPixelAction } from "@/app/(admin)/admin/plan/actions";
+import { FREEZE_COPY } from "@/lib/billing/freeze";
+import { PLAN_COPY } from "@/lib/billing/plan-copy";
 import { ActionError, ActionSuccess } from "@/app/(admin)/admin/split-tests/split-test-ui";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
@@ -106,13 +109,34 @@ export default async function PixelSettingsPage({
             All pixels
           </Link>
         </Button>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{pixel.name}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{pixel.name}</h1>
+          {pixel.frozen ? <FrozenPixelBadge /> : null}
+        </div>
         <p className="mt-2 break-all text-sm text-slate-600">
           Pixel {pixel.dataset_id}
           {pixel.token_last_four ? ` | Token ending ${pixel.token_last_four}` : ""}
         </p>
       </div>
 
+      {pixel.frozen ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900" role="status">
+          <p className="font-semibold">{FREEZE_COPY.badgeTitle}</p>
+          <p>{FREEZE_COPY.frozenPixelTest}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <form action={reactivateFrozenPixelAction}>
+              <input type="hidden" name="pixel_id" value={pixel.id} />
+              <input type="hidden" name="return_to" value={`/admin/pixels/${pixel.id}`} />
+              <Button type="submit" size="sm">
+                {FREEZE_COPY.reactivate}
+              </Button>
+            </form>
+            <Link href="/admin/plan" className="text-sm font-semibold text-emerald-700 hover:underline">
+              {PLAN_COPY.seePlans}
+            </Link>
+          </div>
+        </div>
+      ) : null}
       {actionError ? <ActionError message={actionError} /> : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
       {pixel.test_event_code ? (

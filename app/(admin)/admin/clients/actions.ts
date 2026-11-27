@@ -1,10 +1,16 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ZodError } from "zod";
 import { requirePlatformOwner } from "@/lib/auth/owner-server";
-import { ownerBadgeSchema, ownerPlanSchema } from "@/lib/owner/format";
+import { getAdminTenantId } from "@/lib/auth/tenant";
+import { drainLifecycleDeliveries } from "@/lib/lifecycle/drain";
+import { LIFECYCLE_COPY, lifecycleConfig } from "@/lib/lifecycle/events";
+import { enqueueLifecycleTest } from "@/lib/lifecycle/queue";
+import { hitRateLimit } from "@/lib/security/rate-limit";
+import { ownerBadgeSchema, ownerPlanSchema, planChangeParams, type PlanChangeCounts } from "@/lib/owner/format";
 import {
   restoreForm,
   restoreTenant,
@@ -37,21 +43,26 @@ function errorMessage(error: unknown) {
   return "Something went wrong. Please try again.";
 }
 
-function withParam(path: string, key: "saved" | "error", value: string) {
-  return `${path}?${key}=${encodeURIComponent(value)}`;
+function withParams(path: string, params: Record<string, string>) {
+  return `${path}?${new URLSearchParams(params).toString()}`;
 }
 
-async function runOwnerAction(formData: FormData, saved: string, work: (actor: string) => Promise<void>) {
+/** Runs an owner action; a plan change's frozen and restored counts are added to the redirect. */
+async function runOwnerAction(
+  formData: FormData,
+  saved: string,
+  work: (actor: string) => Promise<PlanChangeCounts | void>
+) {
   // The owner check runs before any input is read (non-owners get a 404).
   const owner = await requirePlatformOwner();
   const path = returnPath(formData);
   let destination: string;
   try {
-    await work(owner.email);
-    destination = withParam(path, "saved", saved);
+    const counts = await work(owner.email);
+    destination = withParams(path, { saved, ...(counts ? planChangeParams(counts) : {}) });
   } catch (error) {
     console.error("[owner] action failed:", error instanceof Error ? error.message : "unknown error");
-    destination = withParam(path, "error", errorMessage(error));
+    destination = withParams(path, { error: errorMessage(error) });
   }
   revalidatePath(CLIENTS_PATH, "layout");
   redirect(destination);
@@ -60,7 +71,7 @@ async function runOwnerAction(formData: FormData, saved: string, work: (actor: s
 export async function setClientPlanAction(formData: FormData) {
   await runOwnerAction(formData, "plan", async (actor) => {
     const plan = ownerPlanSchema.parse(field(formData, "plan"));
-    await setTenantPlan(actor, field(formData, "tenant_id"), plan);
+    return setTenantPlan(actor, field(formData, "tenant_id"), plan);
   });
 }
 
@@ -73,13 +84,13 @@ export async function setClientBadgeAction(formData: FormData) {
 
 export async function suspendClientAction(formData: FormData) {
   await runOwnerAction(formData, "suspended", async (actor) => {
-    await suspendTenant(actor, field(formData, "tenant_id"), field(formData, "reason"));
+    return suspendTenant(actor, field(formData, "tenant_id"), field(formData, "reason"));
   });
 }
 
 export async function restoreClientAction(formData: FormData) {
   await runOwnerAction(formData, "restored", async (actor) => {
-    await restoreTenant(actor, field(formData, "tenant_id"));
+    return restoreTenant(actor, field(formData, "tenant_id"));
   });
 }
 
@@ -92,6 +103,20 @@ export async function takeDownFormAction(formData: FormData) {
 export async function restoreFormAction(formData: FormData) {
   await runOwnerAction(formData, "form-restored", async (actor) => {
     await restoreForm(actor, field(formData, "funnel_id"));
+  });
+}
+
+/** Queues a test event for the owner's own account and sends it straight away (decision D20). */
+export async function sendLifecycleTestAction(formData: FormData) {
+  await runOwnerAction(formData, "lifecycle_test", async (actor) => {
+    if (!lifecycleConfig(process.env)) throw new Error(LIFECYCLE_COPY.testOff);
+    const limit = await hitRateLimit({ scope: "lifecycle-test", subject: actor, limit: 10, windowSeconds: 3600 });
+    if (!limit.allowed) throw new Error(LIFECYCLE_COPY.testLimit);
+    const tenantId = await getAdminTenantId();
+    const id = await enqueueLifecycleTest(tenantId);
+    if (!id) throw new Error(LIFECYCLE_COPY.testFailed);
+    const result = await drainLifecycleDeliveries(randomUUID(), { budgetMs: 20000, limit: 1, ids: [id] });
+    if (result.sent !== 1) throw new Error(LIFECYCLE_COPY.testFailed);
   });
 }
 

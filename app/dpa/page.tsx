@@ -3,7 +3,7 @@ import { LegalList, LegalPage, LegalSection } from "@/components/legal/legal-pag
 import { CONTACT_EMAIL } from "@/lib/billing/plans";
 
 export const metadata = {
-  title: "Data Processing Addendum | FormBook",
+  title: "Data Processing Addendum",
   description: "How Gondal Tech processes lead data for FormBook customers."
 };
 

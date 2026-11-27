@@ -21,6 +21,16 @@ import { FormFooter } from "@/components/booking/form-footer";
 import { postMetaEvents, rememberFbclidSeenAt, type BrowserMetaEvent } from "@/components/booking/meta-bridge";
 import { PhoneInput } from "@/components/booking/phone-input";
 import { CalendlyInline } from "@/components/booking/calendly-inline";
+import {
+  PREVIEW_COPY,
+  PREVIEW_READY_MESSAGE,
+  isPreviewThemeMessage,
+  previewSlots,
+  type PreviewTheme
+} from "@/lib/booking/preview";
+
+/** Stands in for the lead session id in the in-editor preview; never sent anywhere. */
+const PREVIEW_SESSION_ID = "preview";
 
 type FlowStep = "intake" | "slots" | "booked" | "disqualified";
 type AnswerValue = string | string[];
@@ -81,6 +91,11 @@ interface BookingFlowProps {
   splitTest?: { id: string } | null;
   /** Visitor id chosen by the split test link; wins over the stored one. */
   initialVisitorId?: string | null;
+  /**
+   * In-editor preview (decision D18): no /api call, no Meta bridge, no
+   * analytics, no redirect, sample slots and a "Preview" banner.
+   */
+  preview?: boolean;
 }
 
 /** Query parameter the split test resolver adds; removed from the address bar after load. */
@@ -410,8 +425,9 @@ function getIntakePageTrackingMetadata(page: IntakePage, pageIndex: number) {
   };
 }
 
-export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId = null }: BookingFlowProps) {
+export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId = null, preview = false }: BookingFlowProps) {
   const [step, setStep] = useState<FlowStep>("intake");
+  const [previewTheme, setPreviewTheme] = useState<PreviewTheme | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [intakePageIndex, setIntakePageIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
@@ -428,7 +444,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   const formStartedRef = useRef(false);
   const [metaConsent, setMetaConsent] = useState(false);
   const metaConsentLabel = funnel.meta_consent_checkbox_label ?? null;
-  const splitTestId = splitTest?.id ?? null;
+  const splitTestId = preview ? null : splitTest?.id ?? null;
 
   /** One id per page load, sent with every analytics call. */
   function getPageLoadId() {
@@ -468,11 +484,12 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   const firstActiveContactField = flowItems.find((item) => item.type === "contact" && contactFields[item.key]);
   const pulsedContactField = funnel.phone_pulse_enabled && firstActiveContactField?.type === "contact" ? firstActiveContactField.key : null;
   const isEmbed = mode === "embed";
-  const accentColor = resolveBrandColor(funnel.accent_color, brandAccentGreen);
-  const buttonColor = resolveBrandColor(funnel.button_color, brandDarkGreen);
+  // The editor's unsaved color and corner values win in the preview.
+  const accentColor = resolveBrandColor(previewTheme?.accent_color ?? funnel.accent_color, brandAccentGreen);
+  const buttonColor = resolveBrandColor(previewTheme?.button_color ?? funnel.button_color, brandDarkGreen);
   const accentSoftColor = colorWithAlpha(accentColor, 0.13);
   const themeStyle = {
-    "--radius": `${funnel.border_radius}px`,
+    "--radius": `${previewTheme?.border_radius ?? funnel.border_radius}px`,
     "--leadder-accent": accentColor,
     "--leadder-accent-soft": accentSoftColor,
     "--leadder-button": buttonColor
@@ -500,7 +517,27 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       ? "hidden w-full flex-col border-b border-slate-200 bg-white lg:flex lg:min-h-[590px] lg:border-b-0 lg:border-r lg:border-slate-200"
       : "flex w-full flex-col border-b border-slate-200 bg-white lg:min-h-[590px] lg:border-b-0 lg:border-r lg:border-slate-200";
 
+  // Preview only: take theme values from the editor on this origin, and tell it we are ready.
   useEffect(() => {
+    if (!preview) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (isPreviewThemeMessage(event.data)) setPreviewTheme(event.data.theme);
+    };
+    window.addEventListener("message", onMessage);
+    try {
+      if (window.parent && window.parent !== window.self) {
+        window.parent.postMessage({ type: PREVIEW_READY_MESSAGE }, window.location.origin);
+      }
+    } catch {
+      // Opened outside the editor: nothing to tell.
+    }
+    return () => window.removeEventListener("message", onMessage);
+  }, [preview]);
+
+  useEffect(() => {
+    // The preview records nothing: no visitor id, cookie or page view.
+    if (preview) return;
     const id = initialVisitorId ?? getVisitorId();
     if (initialVisitorId) adoptVisitorId(id);
     // Only an id the server used for assignment goes in the cookie. When the
@@ -527,7 +564,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   }, [funnel.id, mode]);
 
   useEffect(() => {
-    if (!visitorId) return;
+    if (preview || !visitorId) return;
 
     const trackingParams = getTrackingParams();
     const stepMetadata =
@@ -564,12 +601,13 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
       }
     }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the helpers read refs and a stable prop
-  }, [currentIntakePage, funnel.id, intakePageIndex, intakePages.length, mode, sessionId, step, visitorId]);
+  }, [currentIntakePage, funnel.id, intakePageIndex, intakePages.length, mode, preview, sessionId, step, visitorId]);
 
   /** form_start: sent once per page load, the first time the visitor fills anything in. */
   function markFormStarted() {
     if (formStartedRef.current) return;
     formStartedRef.current = true;
+    if (preview) return;
     void postJson<AnalyticsResponse>("/api/analytics", {
       funnel_id: funnel.id,
       lead_session_id: sessionId ?? undefined,
@@ -586,6 +624,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
   }
 
   useEffect(() => {
+    if (preview) return;
     let isMounted = true;
 
     void getBrowserFingerprint().then((value) => {
@@ -597,10 +636,10 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [preview]);
 
   useEffect(() => {
-    if (!sessionId || step === "booked" || step === "disqualified") return;
+    if (preview || !sessionId || step === "booked" || step === "disqualified") return;
 
     const onBeforeUnload = () => {
       const payload = JSON.stringify({ lead_session_id: sessionId });
@@ -609,7 +648,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [sessionId, step]);
+  }, [preview, sessionId, step]);
 
   function getContactValidationError(values: ContactValues, fields: ContactFieldKey[], requireContactIdentity = true) {
     for (const field of fields) {
@@ -637,6 +676,11 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
   async function ensureLeadSession(values: ContactValues, consentGiven = metaConsent) {
     if (sessionId) return sessionId;
+    if (preview) {
+      // Nothing is saved: a local id stands in for the lead session.
+      setSessionId(PREVIEW_SESSION_ID);
+      return PREVIEW_SESSION_ID;
+    }
 
     const typedFullName = values.full_name?.trim() ?? "";
     const nameParts = splitFullName(typedFullName);
@@ -719,6 +763,12 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
   async function loadSlots(leadSessionId: string) {
     setStep("slots");
+    if (preview) {
+      // Sample times for every calendar; the real availability is never read.
+      setSlots(previewSlots(new Date(), timezone, funnel.slot_duration_minutes ?? 30));
+      setCalendlyEmbed(null);
+      return;
+    }
     const response = await postJson<SlotResponse>("/api/bookings/slots", {
       lead_session_id: leadSessionId,
       timezone
@@ -729,7 +779,7 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
   /** Calendly reported a booking: FormBook checks it server-side, then shows the booked state either way. */
   async function confirmCalendlyBooking(eventUri: string, inviteeUri: string) {
-    if (!sessionId) return;
+    if (!sessionId || preview) return;
     setError(null);
     try {
       const response = await postJson<CalendlyConfirmResponse>("/api/bookings/calendly", {
@@ -760,6 +810,13 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     if (!sessionId) return;
     setSelectedSlot(slot.startTime);
     setError(null);
+
+    if (preview) {
+      // No booking and no redirect: the preview confirmation says what would happen.
+      setSelectedSlot(null);
+      setStep("booked");
+      return;
+    }
 
     try {
       const booking = await postJson<BookingResponse>("/api/bookings", {
@@ -821,6 +878,15 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
     setError(null);
     setIsLoading(true);
     try {
+      if (preview) {
+        // Qualified locally with the same answer rules; nothing is sent.
+        if (hasDisqualifyingAnswer) {
+          setStep("disqualified");
+          return;
+        }
+        await loadSlots(leadSessionId);
+        return;
+      }
       const hasSavedAnswers = funnel.questions.some((question) => answerSnapshot[question.id] !== undefined);
       if (hasSavedAnswers) {
         const result = await saveAnswers(leadSessionId, answerSnapshot);
@@ -948,6 +1014,14 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
   return (
     <main className="min-h-screen bg-white p-1 text-slate-950 sm:p-2 lg:p-3" style={themeStyle}>
+      {preview ? (
+        <p
+          className="mx-auto mb-2 max-w-xl rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-900"
+          role="status"
+        >
+          {PREVIEW_COPY.banner}
+        </p>
+      ) : null}
       <section
         className={
           isEmbed
@@ -959,7 +1033,10 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
 
         {isFinishedState ? (
           step === "booked" ? (
-          <BookedConfirmation buttonStyle={buttonStyle} />
+          <BookedConfirmation
+            buttonStyle={buttonStyle}
+            previewNote={preview ? (funnel.redirect_url ? PREVIEW_COPY.bookedRedirect : PREVIEW_COPY.booked) : null}
+          />
           ) : (
             <DisqualifiedConfirmation buttonStyle={buttonStyle} />
           )
@@ -1073,6 +1150,12 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
                     </div>
                   ) : null}
 
+                  {step === "slots" && preview && funnel.calendar_provider === "calendly" ? (
+                    <p className="mb-4 rounded-[var(--radius)] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                      {PREVIEW_COPY.calendlyNote}
+                    </p>
+                  ) : null}
+
                   {step === "slots" ? (
                     isEmbed ? (
                       calendlyArea ?? <SlotPicker
@@ -1122,12 +1205,27 @@ export function BookingFlow({ funnel, mode, splitTest = null, initialVisitorId =
           </>
         )}
       </section>
-      <FormFooter slug={funnel.slug} mode={mode} showBadge={funnel.show_badge} />
+      {preview ? null : <FormFooter slug={funnel.slug} mode={mode} showBadge={funnel.show_badge} />}
     </main>
   );
 }
 
-function BookedConfirmation({ buttonStyle }: { buttonStyle: CSSProperties }) {
+function BookedConfirmation({ buttonStyle, previewNote = null }: { buttonStyle: CSSProperties; previewNote?: string | null }) {
+  if (previewNote) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center px-5 py-12 text-center sm:px-8 lg:col-span-2 lg:min-h-[540px]">
+        <div className="mx-auto max-w-lg space-y-5">
+          <div
+            className="mx-auto flex h-16 w-16 items-center justify-center rounded-full text-sm font-semibold text-white shadow-sm"
+            style={buttonStyle}
+          >
+            OK
+          </div>
+          <StepHeading eyebrow={PREVIEW_COPY.title} title={previewNote} align="center" />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-[420px] items-center justify-center px-5 py-12 text-center sm:px-8 lg:col-span-2 lg:min-h-[540px]">
       <div className="mx-auto max-w-lg space-y-5">

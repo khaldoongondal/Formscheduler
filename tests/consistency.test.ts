@@ -375,3 +375,34 @@ describe("Meta booked call for Calendly when both confirmations arrive", () => {
     assert.match(body, /if \(session\.status === "booked"\) return \{ metaEvents: \[\] \};/);
   });
 });
+
+describe("Sprint 4 migrations keep tables and functions service-role only", () => {
+  const INVOKER_BY_DESIGN = new Set(["guard_tenant_platform_columns", "guard_funnel_platform_columns"]);
+  const files = ["0032_plan_changes_and_freeze.sql", "0033_onboarding.sql", "0034_lifecycle_sync.sql"];
+
+  for (const file of files) {
+    it(`${file}: every function is revoked from public and granted to service_role`, () => {
+      const sql = readFileSync(path.join(ROOT, "supabase", "migrations", file), "utf8");
+      const names = [...sql.matchAll(/create or replace function public\.([a-z_0-9]+)\(/g)].map((match) => match[1]);
+      assert.ok(names.length > 0, "expected at least one function");
+      for (const name of names) {
+        if (INVOKER_BY_DESIGN.has(name)) continue;
+        assert.ok(sql.includes(`revoke all on function public.${name}(`), `${file}: revoke missing for ${name}`);
+        assert.ok(sql.includes(`grant execute on function public.${name}(`), `${file}: grant missing for ${name}`);
+      }
+    });
+
+    it(`${file}: every new table has row level security and no client access`, () => {
+      const sql = readFileSync(path.join(ROOT, "supabase", "migrations", file), "utf8");
+      const tables = [...sql.matchAll(/create table if not exists public\.([a-z_0-9]+)/g)].map((match) => match[1]);
+      for (const table of tables) {
+        assert.ok(
+          sql.includes(`alter table public.${table} enable row level security`),
+          `${file}: row level security missing for ${table}`
+        );
+        assert.ok(sql.includes(`revoke all on table public.${table}`), `${file}: revoke missing for ${table}`);
+        assert.doesNotMatch(sql, new RegExp(`create policy[^;]*on public\.${table}\b`), `${file}: policy on ${table}`);
+      }
+    });
+  }
+});

@@ -1,5 +1,7 @@
+import Link from "next/link";
+import { FREEZE_COPY } from "@/lib/billing/freeze";
+import { PLAN_COPY } from "@/lib/billing/plan-copy";
 import {
-  CONTACT_EMAIL,
   SUSPENDED_MESSAGE,
   formatPlanPrice,
   type FormUsage,
@@ -11,13 +13,17 @@ export function PlanUsage({
   state,
   plan,
   usage,
-  pixelCount = null
+  pixelCount = null,
+  frozenForms = 0,
+  frozenPixels = 0
 }: {
   state: PlanState;
   plan: PlanDefinition | null;
   usage: FormUsage;
-  /** Meta pixels in use; the meter is hidden when null (table not there yet). */
+  /** Meta pixels counted against the limit (not frozen); the meter is hidden when null (table not there yet). */
   pixelCount?: number | null;
+  frozenForms?: number;
+  frozenPixels?: number;
 }) {
   if (state === "suspended" || !plan) {
     return (
@@ -30,6 +36,7 @@ export function PlanUsage({
 
   const activeFull = usage.activeForms >= plan.maxActiveForms;
   const draftsFull = usage.draftForms >= plan.maxDraftForms;
+  const anyFrozen = frozenForms > 0 || frozenPixels > 0;
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -42,16 +49,29 @@ export function PlanUsage({
         <UsageMeter label="Drafts" used={usage.draftForms} max={plan.maxDraftForms} />
         {pixelCount === null ? null : <UsageMeter label="Meta pixels" used={pixelCount} max={plan.maxPixels} />}
       </div>
-      {activeFull || draftsFull ? (
+      {activeFull || draftsFull || anyFrozen ? (
         <div className="mt-4 space-y-1 text-sm leading-6 text-amber-900">
           {activeFull ? (
             <p>
-              You are using all {plan.maxActiveForms} active forms. Switch a form to draft to activate another.
-              {plan.id === "free" ? ` Need more? Email ${CONTACT_EMAIL} about the Scaling plan.` : null}
+              {PLAN_COPY.usageActiveFull(plan.maxActiveForms)}
+              {plan.id === "free" ? (
+                <>
+                  {" "}
+                  <Link href="/admin/plan" className="font-semibold text-emerald-700 hover:underline">
+                    {PLAN_COPY.usageNeedMore}
+                  </Link>
+                </>
+              ) : null}
             </p>
           ) : null}
-          {draftsFull ? (
-            <p>You are using all {plan.maxDraftForms} drafts. Delete a draft to create a new form.</p>
+          {draftsFull ? <p>{PLAN_COPY.usageDraftsFull(plan.maxDraftForms)}</p> : null}
+          {anyFrozen ? (
+            <p>
+              {FREEZE_COPY.listBanner(frozenForms, frozenPixels)}{" "}
+              <Link href="/admin/plan" className="font-semibold text-emerald-700 hover:underline">
+                {FREEZE_COPY.listBannerLink}
+              </Link>
+            </p>
           ) : null}
         </div>
       ) : null}

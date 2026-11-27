@@ -6,10 +6,12 @@ import { SplitTestResolver } from "@/components/booking/split-test-resolver";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { VISITOR_COOKIE } from "@/lib/booking/visitor-id";
 import { getMissingSupabaseServiceEnv } from "@/lib/env";
+import { splitLinkMetadata } from "@/lib/funnels/public-copy";
 import { resolvePublicSplitTest } from "@/lib/split-tests/public";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { robots: { index: false } };
+// Neutral and noindex: no FormBook title, Open Graph image or og:url.
+export const metadata: Metadata = splitLinkMetadata();
 
 export default async function SplitTestEmbedPage({
   params,

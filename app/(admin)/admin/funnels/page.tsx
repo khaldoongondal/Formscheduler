@@ -10,7 +10,13 @@ import { listConnections, type ConnectionSummary } from "@/lib/connections/servi
 import { SETUP_COPY, formSetupError } from "@/lib/connections/setup-state";
 import { listGhlConnections } from "@/lib/ghl/connections";
 import { getRunningTestsByFunnel } from "@/lib/split-tests/service";
+import { FREEZE_COPY } from "@/lib/billing/freeze";
+import { getOnboardingState } from "@/lib/onboarding/service";
 import { PlanUsage } from "@/components/admin/plan-usage";
+import { SetupCallCard } from "@/components/admin/setup-call-card";
+import { SetupChecklist } from "@/components/admin/setup-checklist";
+import { TemplatePicker } from "@/components/admin/template-picker";
+import { UpgradeHint } from "@/components/admin/upgrade-hint";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +29,7 @@ export const dynamic = "force-dynamic";
 export default async function FunnelsPage({
   searchParams
 }: {
-  searchParams?: Promise<{ create?: string; error?: string; saved?: string }>;
+  searchParams?: Promise<{ create?: string; error?: string; saved?: string; template?: string }>;
 }) {
   const missingEnv = getMissingSupabaseAdminEnv();
   if (missingEnv.length > 0) {
@@ -37,14 +43,16 @@ export default async function FunnelsPage({
   }
 
   const tenantId = await getAdminTenantId();
-  const [funnels, planSummary, runningTests, ghlConnections, connections] = await Promise.all([
+  const [funnels, planSummary, runningTests, ghlConnections, connections, onboarding] = await Promise.all([
     listFunnels(tenantId),
     getTenantPlanSummary(tenantId),
     getRunningTestsByFunnel(tenantId),
     // The two lists feed the "Needs setup" badges only; no provider is called.
     listGhlConnections(tenantId).catch((): Array<{ id: string; calendar_id: string | null; is_active: boolean }> | null => null),
     // Empty before migration 0029.
-    listConnections(tenantId).catch((): ConnectionSummary[] => [])
+    listConnections(tenantId).catch((): ConnectionSummary[] => []),
+    // Never throws: every read inside degrades to "not done".
+    getOnboardingState(tenantId)
   ]);
   const needsSetup = (funnel: (typeof funnels)[number]) =>
     ghlConnections ? formSetupError(funnel, ghlConnections, connections) !== null : false;
@@ -85,13 +93,27 @@ export default async function FunnelsPage({
         )}
       </div>
 
-      <PlanUsage state={planSummary.state} plan={planSummary.plan} usage={planSummary.usage} pixelCount={planSummary.pixelCount} />
+      <SetupChecklist state={onboarding} returnTo="/admin/funnels" />
+      <SetupCallCard moment={onboarding.setupCall.moment} url={onboarding.setupCall.url} returnTo="/admin/funnels" />
+
+      <PlanUsage
+        state={planSummary.state}
+        plan={planSummary.plan}
+        usage={planSummary.usage}
+        pixelCount={planSummary.unfrozenPixelCount}
+        frozenForms={planSummary.frozen.forms}
+        frozenPixels={planSummary.frozen.pixels}
+      />
 
       {actionError ? <ActionError message={actionError} /> : null}
       {actionSuccess ? <ActionSuccess message={actionSuccess} /> : null}
 
       {showCreateForm ? (
-        <CreateFunnelCard canCancel={funnels.length > 0} blockedMessage={createBlockedMessage} />
+        <CreateFunnelCard
+          canCancel={funnels.length > 0}
+          blockedMessage={createBlockedMessage}
+          template={typeof query.template === "string" ? query.template : null}
+        />
       ) : null}
 
       <section className="grid gap-4">
@@ -104,7 +126,7 @@ export default async function FunnelsPage({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold text-slate-950">{funnel.name}</h2>
-                  <StatusBadge published={funnel.is_published} />
+                  {!funnel.is_published && funnel.frozen_at ? <FrozenBadge /> : <StatusBadge published={funnel.is_published} />}
                   {funnel.taken_down_at ? <TakenDownBadge /> : null}
                   {runningTests.has(funnel.id) ? <SplitTestBadge /> : null}
                   {needsSetup(funnel) ? <NeedsSetupBadge /> : null}
@@ -147,7 +169,15 @@ export default async function FunnelsPage({
   );
 }
 
-function CreateFunnelCard({ canCancel, blockedMessage }: { canCancel: boolean; blockedMessage: string | null }) {
+function CreateFunnelCard({
+  canCancel,
+  blockedMessage,
+  template
+}: {
+  canCancel: boolean;
+  blockedMessage: string | null;
+  template: string | null;
+}) {
   return (
     <Card id="create-funnel" className="max-w-3xl scroll-mt-24">
         <CardHeader>
@@ -156,11 +186,13 @@ function CreateFunnelCard({ canCancel, blockedMessage }: { canCancel: boolean; b
         </CardHeader>
         <CardContent>
           {blockedMessage ? (
-            <p className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-              {blockedMessage}
-            </p>
+            <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+              <p>{blockedMessage}</p>
+              <UpgradeHint message={blockedMessage} />
+            </div>
           ) : null}
           <form action={createFunnelAction} className="space-y-5">
+            <TemplatePicker selected={template} />
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="name">Public title</Label>
@@ -178,6 +210,7 @@ function CreateFunnelCard({ canCancel, blockedMessage }: { canCancel: boolean; b
                 name="description"
                 placeholder="Book your 20-min discovery meeting today."
               />
+              <p className="text-xs leading-5 text-slate-500">Leave this empty to use the template&apos;s description.</p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={Boolean(blockedMessage)}>
@@ -201,7 +234,16 @@ function ActionError({ message }: { message: string }) {
     <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
       <p className="font-semibold">This setting was not saved.</p>
       <p>{message}</p>
+      <UpgradeHint message={message} />
     </div>
+  );
+}
+
+function FrozenBadge() {
+  return (
+    <span className="rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700" title={FREEZE_COPY.badgeTitle}>
+      {FREEZE_COPY.badge}
+    </span>
   );
 }
 

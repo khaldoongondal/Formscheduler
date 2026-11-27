@@ -159,6 +159,12 @@ export async function deliverMetaRow(row: MetaEventDelivery, owner: string, deps
   if (decision === "defer") {
     return settle({ outcome: "deferred", reason: "form_paused" });
   }
+  // A pixel frozen by a plan change is a pause like an unpublished form: the
+  // row waits (pending, attempt refunded) and goes out if the pixel is
+  // reactivated within the 7-day expiry. Final skips above still win.
+  if (pixel.frozen === true) {
+    return settle({ outcome: "deferred", reason: "pixel_frozen" });
+  }
 
   // Switches are re-read at send time: an event switched off while it waited is not sent.
   if (isMetaEventKey(row.event_key) && !isEventEnabled(row.event_key, pixel.switches)) {

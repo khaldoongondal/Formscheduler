@@ -87,7 +87,7 @@ export const HELP_COPY: {
   metaTitle: string; metaDescription: string; title: string; subtitle: string; contentsHeading: string;
   exampleHeading: string; verifyHeading: string; supportLine: string; sections: readonly HelpSection[];
 } = {
-  metaTitle: "Connecting your calendar and CRM | FormBook",
+  metaTitle: "Connecting your calendar and CRM",
   metaDescription: "How to connect a calendar and a CRM to FormBook, a tool from Gondal Tech.",
   title: "Connecting your calendar and CRM",
   subtitle: "FormBook, a tool from Gondal Tech",

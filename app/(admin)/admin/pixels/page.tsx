@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { createPixelAction } from "@/app/(admin)/admin/pixels/actions";
-import { PIXEL_COPY, PIXEL_SAVED_MESSAGES, PixelFields, usageLine } from "@/app/(admin)/admin/pixels/pixel-ui";
+import { FrozenPixelBadge, PIXEL_COPY, PIXEL_SAVED_MESSAGES, PixelFields, usageLine } from "@/app/(admin)/admin/pixels/pixel-ui";
 import { ActionError, ActionSuccess } from "@/app/(admin)/admin/split-tests/split-test-ui";
 import { SaveSubmitButton } from "@/components/admin/save-submit-button";
+import { UpgradeHint } from "@/components/admin/upgrade-hint";
 import { SetupRequired } from "@/components/setup/setup-required";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAdminTenantId } from "@/lib/auth/tenant";
@@ -46,7 +47,9 @@ export default async function PixelsPage({
   }
   const state = await getTenantPlanState(tenantId);
   const plan = state === "suspended" ? null : PLANS[state];
-  const limit = checkPixelLimit(state, pixels.length);
+  // Frozen pixels (migration 0032) do not count against the limit.
+  const unfrozenCount = pixels.filter((pixel) => !pixel.frozen).length;
+  const limit = checkPixelLimit(state, unfrozenCount);
 
   return (
     <div className="space-y-8">
@@ -55,7 +58,7 @@ export default async function PixelsPage({
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{PIXEL_COPY.heading}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{PIXEL_COPY.subheading}</p>
         {plan ? (
-          <p className="mt-3 text-sm font-medium text-slate-700">{usageLine(pixels.length, plan.maxPixels, plan.name)}</p>
+          <p className="mt-3 text-sm font-medium text-slate-700">{usageLine(unfrozenCount, plan.maxPixels, plan.name)}</p>
         ) : null}
       </div>
 
@@ -80,7 +83,10 @@ export default async function PixelsPage({
               return (
                 <li key={pixel.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0 space-y-1">
-                    <p className="font-semibold text-slate-950">{pixel.name}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-slate-950">{pixel.name}</p>
+                      {pixel.frozen ? <FrozenPixelBadge /> : null}
+                    </div>
                     <p className="break-all text-sm text-slate-600">
                       Pixel {pixel.dataset_id}
                       {pixel.token_last_four ? ` | Token ending ${pixel.token_last_four}` : ""}
@@ -114,7 +120,10 @@ export default async function PixelsPage({
             {state === "suspended" ? (
               <p className="text-sm leading-6 text-amber-900">{SUSPENDED_MESSAGE}</p>
             ) : !limit.allowed ? (
-              <p className="text-sm leading-6 text-amber-900">{limit.message}</p>
+              <div className="text-sm leading-6 text-amber-900">
+                <p>{limit.message}</p>
+                <UpgradeHint message={limit.message} />
+              </div>
             ) : (
               <form action={createPixelAction} className="space-y-5">
                 <PixelFields idPrefix="create" />

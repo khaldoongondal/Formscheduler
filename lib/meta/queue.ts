@@ -37,21 +37,32 @@ function isWaitingStatus(value: unknown): value is QueuedMetaEvent["status"] {
   return value === "awaiting_consent" || value === "held" || value === "pending";
 }
 
-/** Switches and sending mode of the form's pixel (same tenant only), or null. One query. */
+/**
+ * Switches and sending mode of the form's pixel (same tenant only), or null.
+ * One query. A pixel frozen by a plan change (migration 0032) gives null, so
+ * no new Meta row is ever queued for it.
+ */
 export async function loadPixelGate(funnel: FunnelMeta): Promise<PixelGate | null> {
   if (!funnel.meta_pixel_id) return null;
   try {
     const supabase = createServiceClient();
-    const { data, error } = await supabase
-      .from("meta_pixels")
-      .select(GATE_COLUMNS)
-      .eq("id", funnel.meta_pixel_id)
-      .eq("tenant_id", funnel.tenant_id)
-      .maybeSingle();
+    const read = (columns: string) =>
+      supabase
+        .from("meta_pixels")
+        .select(columns)
+        .eq("id", funnel.meta_pixel_id as string)
+        .eq("tenant_id", funnel.tenant_id)
+        .maybeSingle();
+    let result = await read(`${GATE_COLUMNS},frozen_at`);
+    if (result.error?.code === "42703") result = await read(GATE_COLUMNS);
+    const { data, error } = result;
     if (error) throw new Error(error.message);
     if (!data) return null;
-    const row = data as unknown as PixelGate;
-    return { ...row, sending_mode: row.sending_mode === "hold" ? "hold" : "automatic" };
+    const row = data as unknown as PixelGate & { frozen_at?: string | null };
+    if (row.frozen_at) return null;
+    const { frozen_at: _frozenAt, ...gate } = row;
+    void _frozenAt;
+    return { ...gate, sending_mode: gate.sending_mode === "hold" ? "hold" : "automatic" };
   } catch (error) {
     logError("pixel lookup failed", error);
     return null;

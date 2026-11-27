@@ -4,6 +4,88 @@ FormBook is a tool from Gondal Tech. Production address after the move: `https:/
 
 Pushing `main` deploys production on Vercel. Production has no staging copy, so follow the checklist below in order and do not skip the backup.
 
+## Sprint 4 release checklist
+
+Sprint 4 adds the Plan page and upgrade path (checkout and billing on a Gondal Tech GoHighLevel payment page, never in the app), the downgrade freeze and restore, plan history, the onboarding checklist, starter templates and in-editor preview, account lifecycle events sent to the owner's GoHighLevel account, the owner activation funnel, and the new public product page with SEO metadata. Follow the steps in order.
+
+### 1. Prerequisite
+
+The Sprint 2 and Sprint 3 checklists (below) must be completed first: migrations `0025` to `0031` applied in order and their smoke tests passed. Do not apply `0032` to `0034` to a database without `0025` to `0031`.
+
+### 2. Back up production
+
+Supabase dashboard: Database, Backups, take a manual backup (or run `pg_dump` against the production connection string and keep the file somewhere safe).
+
+### 3. Apply the migrations in order
+
+Run `0032_plan_changes_and_freeze.sql`, then `0033_onboarding.sql`, then `0034_lifecycle_sync.sql`. Each file is additive and safe to run twice. After each one, run its checks:
+
+```sql
+-- 0032
+select count(*), count(distinct account_ref) from public.tenants;          -- the two numbers are equal
+select count(*) from public.funnels where frozen_at is not null;            -- 0
+select proname from pg_proc where pronamespace = 'public'::regnamespace
+  and proname in ('apply_tenant_plan_change', 'swap_frozen_form', 'tenant_form_activity', 'tenant_pixel_activity');   -- 4 rows
+
+-- 0033
+select to_regclass('public.tenant_onboarding');                             -- not null
+
+-- 0034
+select count(*) from public.lifecycle_event_deliveries;                     -- 0 right after (the backfill queues nothing)
+select first_connection_at, first_form_activated_at, first_lead_at, first_booking_at from public.tenants;   -- filled where data exists
+select tgname from pg_trigger
+where tgname like '%lifecycle%' and tgname not like 'lifecycle_event_deliveries%';   -- 7 rows
+
+-- Grants (all false)
+select has_table_privilege('authenticated', 'public.tenant_plan_changes', 'select'),
+       has_table_privilege('authenticated', 'public.tenant_onboarding', 'select'),
+       has_table_privilege('authenticated', 'public.lifecycle_event_deliveries', 'select'),
+       has_table_privilege('anon', 'public.tenant_plan_changes', 'select'),
+       has_table_privilege('anon', 'public.tenant_onboarding', 'select'),
+       has_table_privilege('anon', 'public.lifecycle_event_deliveries', 'select');
+```
+
+### 4. Vercel production environment variables
+
+| Variable | Value |
+| --- | --- |
+| `FORMBOOK_UPGRADE_URL` | The Scaling checkout page, without any `ref`. The app adds `?ref=<account reference>` and nothing else. Upgrade button hidden when unset. |
+| `FORMBOOK_BILLING_PORTAL_URL` | The customer billing portal link. Linked as is. Hidden when unset. |
+| `FORMBOOK_LIFECYCLE_WEBHOOK_URL` | The inbound webhook URL that receives lifecycle events. Nothing is sent while unset. |
+| `FORMBOOK_LIFECYCLE_WEBHOOK_SECRET` | `openssl rand -hex 32`. Signs each lifecycle request (`X-FormBook-Signature`). |
+| `FORMBOOK_DEMO_VIDEO_URL` | Walkthrough video link on the home page. Hidden when unset. |
+| `FORMBOOK_SETUP_CALL_URL` | Existing. Free setup call booking link, now also on `/admin/funnels`, `/admin/plan` and the home page. |
+
+The home page is rendered at build time, so changing `FORMBOOK_DEMO_VIDEO_URL`, `FORMBOOK_SETUP_CALL_URL` or `GOOGLE_OAUTH_CLIENT_ID` needs a redeploy before the home page shows it.
+
+### 5. GoHighLevel setup (owner, in person)
+
+The billing and account sync setup in GoHighLevel (custom fields, workflows, checkout page and billing portal) is described in the private release notes. Complete it before the deploy.
+
+The lifecycle webhook request body is flat JSON with these keys: `schema` (`formbook.lifecycle.v1`), `event`, `event_id`, `occurred_at`, `sent_at`, `account_ref`, `contact_name`, `email`, `phone`, `business_name`, `website`, `plan`, `plan_name`, `previous_plan`, `previous_plan_name`, `frozen_forms_by_change`, `frozen_pixels_by_change`, `active_forms`, `draft_forms`, `frozen_forms`, `meta_pixels`, `connections`, `leads_total`, `bookings_total`, `signed_up_at`. Events: `signup_verified`, `first_connection_added`, `first_form_activated`, `first_lead`, `first_booking`, `plan_changed`, `account_suspended`, `account_restored`, `test_ping`. It never carries a tenant id, user id or token. Each request is signed with `X-FormBook-Signature`.
+
+`/api/provision` with `account_ref` never creates a user or tenant: an unknown reference returns `404 {"error":"Account not found."}`. When both `account_ref` and `email` are sent, `account_ref` wins.
+
+### 6. Deploy
+
+Merge and push only after steps 3 to 5.
+
+### 7. Smoke tests
+
+- [ ] S1 Plan page as a free tenant: usage meters show; the Upgrade button opens the order page with only `?ref=fba_...` added to the URL.
+- [ ] S2 Limits: with 3 active forms, activating a fourth shows the limit message with the "See plans and upgrade" link.
+- [ ] S3 Checkout with a test payment on a test tenant: the account reference reaches `/api/provision`; the tenant becomes Scaling; the plan history shows a row by Billing automation.
+- [ ] S4 Downgrade on the test tenant through `/api/provision` with plan `free`: the account moves to free and extra forms are frozen.
+- [ ] S5 Upgrade the same tenant again: ready frozen forms are restored.
+- [ ] S6 Lifecycle: with the webhook URL set, "Send test event" succeeds; first connection, form, lead and booking events each arrive once.
+- [ ] S7 Onboarding: the checklist ticks through; templates work; the preview shows live colors and makes no `/api/*` requests; the setup-call card can be dismissed.
+- [ ] S8 Home page: renders with JavaScript disabled; Lighthouse accessibility and SEO show no errors; `/opengraph-image` and `/twitter-image` render; `/robots.txt` and `/sitemap.xml` load.
+- [ ] S9 Owner page: funnel counts match the client list; the plan history of the test tenant shows every change.
+
+### 8. Rollback
+
+A code rollback through Vercel is safe with `0032` to `0034` applied: all changes are additive, and older code ignores the new columns, tables and triggers (the older plan trigger body would count frozen forms as drafts again, which can only block draft creation). To pause lifecycle sends, unset `FORMBOOK_LIFECYCLE_WEBHOOK_URL`. To undo a wrong freeze, set the plan again from Client Management (restore runs) or clear `funnels.frozen_at` by hand.
+
 ## Sprint 3 release checklist
 
 Sprint 3 splits what GoHighLevel did into two roles. Each form now books into one calendar (GoHighLevel, Google Calendar, Cal.com or Calendly) and sends its leads to one CRM (GoHighLevel, HubSpot or a signed webhook for n8n, Zapier, Make and others). Existing forms stay on GoHighLevel for both roles and keep working as before. The admin page `/admin/ghl-connections` becomes `/admin/connections` (the old address redirects). Follow the steps in order.
