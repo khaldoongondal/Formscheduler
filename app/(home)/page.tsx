@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowDown, ArrowRight, ArrowUpRight, CalendarDays, Check, ListFilter, Radio, Split, Workflow } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUpRight, CalendarDays, Check, ListFilter, Radio, Split, Workflow, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/brand/brand-logo";
 import { parseOwnerLink } from "@/lib/billing/account-ref";
 import { CONTACT_EMAIL } from "@/lib/billing/plans";
@@ -21,7 +21,6 @@ function SignupLink({ label = HOME_COPY.primaryCta.label, light = false }: { lab
 export default function HomePage() {
   const devOpts = { allowHttpLocalhost: process.env.NODE_ENV !== "production" };
   const videoUrl = parseOwnerLink(process.env.FORMBOOK_DEMO_VIDEO_URL, devOpts)?.toString() ?? null;
-  const setupCallUrl = parseOwnerLink(process.env.FORMBOOK_SETUP_CALL_URL, devOpts)?.toString() ?? null;
   const googleCalendar = Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID?.trim());
   const integrations = publicIntegrations({ googleCalendar });
   const steps = homeSteps({ googleCalendar });
@@ -59,7 +58,18 @@ export default function HomePage() {
               )}
             </div>
           </div>
-          <FormPreview />
+        </section>
+        <section className={styles.wrap} aria-label="Interactive FormBook example">
+          <div className={styles.previewPanel}>
+            <div className={styles.previewIntro}>
+              <p className={styles.eyebrow}>Example form</p>
+              <h2>A thoughtful first impression.</h2>
+              <ol>{["Qualify", "Book", "Measure"].map((step, index) => (
+                <li key={step}><span>{String(index + 1).padStart(2, "0")}</span>{step}</li>
+              ))}</ol>
+            </div>
+            <FormPreview />
+          </div>
         </section>
 
         <section aria-labelledby="integrations-title" className={styles.integrationStrip}>
@@ -67,7 +77,8 @@ export default function HomePage() {
             <h2 id="integrations-title">{HOME_COPY.integrationsTitle}</h2>
             {[
               { label: HOME_COPY.calendarsLabel, icon: CalendarDays, items: integrations.calendars },
-              { label: HOME_COPY.crmsLabel, icon: Workflow, items: integrations.crms }
+              { label: HOME_COPY.crmsLabel, icon: Workflow, items: integrations.crms.slice(0, 2) },
+              { label: "Automation", icon: Zap, items: integrations.crms.slice(2) }
             ].map(({ label, icon: Icon, items }) => (
               <div className={styles.integrationGroup} key={label}>
                 <h3><Icon aria-hidden="true" size={16} />{label}</h3>
@@ -133,11 +144,6 @@ export default function HomePage() {
                 </article>
               ))}
             </div>
-            {setupCallUrl && (
-              <p className={styles.setupCall}>{HOME_COPY.setupCallLine}{" "}
-                <a href={setupCallUrl} target="_blank" rel="noopener noreferrer">{HOME_COPY.setupCallLink}<span className="sr-only"> (opens in a new tab)</span></a>
-              </p>
-            )}
           </div>
         </section>
 

@@ -14,7 +14,7 @@ export const CHECKLIST_COPY = {
   showAgain: "Show the setup checklist",
   completeTitle: "Setup complete",
   completeBody: "Your form is ready to take bookings.",
-  callLink: "Book a free setup call",
+  callLink: "Book a setup call with a free CRO diagnostic",
   steps: {
     connect_calendar: { title: "Connect a calendar", body: SETUP_COPY.calendarStepBody, cta: "Connect a calendar" },
     connect_crm: { title: "Connect a CRM", body: SETUP_COPY.crmStepBody, cta: "Connect a CRM" },
@@ -37,17 +37,17 @@ export const CHECKLIST_COPY = {
 
 export const SETUP_CALL_COPY = {
   getting_started: {
-    title: "Book your free setup call",
-    body: "A free setup call with the founder. We set up your first form with you and talk through your booking funnel.",
+    title: "Book your setup call + free CRO diagnostic",
+    body: "A free setup call with the founder. We'll set up your first form and include a free CRO diagnostic to review where leads stall.",
     cta: "Book a setup call"
   },
   first_form_live: {
     title: "Want a second pair of eyes on your funnel?",
-    body: "Book a free setup call with the founder to go through your form, your calendar and your follow-up.",
+    body: "Review your form, calendar and follow-up with the founder in a setup call that includes a free CRO diagnostic.",
     cta: "Book a free call"
   },
   dismiss: "Not now",
-  planPageLine: "Not sure which plan fits? Book a free setup call."
+  planPageLine: "Not sure which plan fits? Book a setup call with a free CRO diagnostic."
 } as const;
 
 export type ChecklistInput = {
