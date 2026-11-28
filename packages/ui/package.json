@@ -1,0 +1,1 @@
+{"name":"@formbook/ui","version":"2.0.0","private":true,"exports":{".":"./index.tsx","./styles.css":"./styles.css","./assets/*":"./assets/*"},"peerDependencies":{"react":"^19.0.0"}}

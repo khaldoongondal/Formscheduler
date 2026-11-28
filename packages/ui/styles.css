@@ -1,0 +1,24 @@
+.fb-jardin {
+  --fb-paper: #f5f5ed;
+  --fb-forest: #193c35;
+  --fb-iris: #806399;
+  --fb-sage: #acbd93;
+  --fb-lilac: #d9cfe8;
+  --fb-clay: #c77962;
+  --fb-surface: var(--fb-paper);
+  --fb-ink: var(--fb-forest);
+  color: var(--fb-ink);
+  background: var(--fb-surface);
+  font-family: "DM Sans", sans-serif;
+}
+.fb-jardin[data-surface="forest"] {
+  --fb-surface: var(--fb-forest);
+  --fb-ink: var(--fb-paper);
+}
+.fb-jardin :focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.fb-display { font: 400 clamp(2rem, 5vw, 5rem)/1.05 "Instrument Serif", Georgia, serif; }
+.fb-stack, .fb-cluster { display: flex; gap: var(--fb-gap, 1rem); }
+.fb-stack { flex-direction: column; }
+.fb-cluster { flex-wrap: wrap; align-items: center; }
+.fb-kpi { margin: 0; padding: 1rem; border: 1px solid #acbd93; border-radius: .75rem; }
+.fb-kpi dd { margin: .4rem 0 0; font-size: 1.75rem; font-variant-numeric: tabular-nums; }
